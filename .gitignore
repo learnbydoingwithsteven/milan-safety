@@ -1,0 +1,14 @@
+transcript.json
+promo/
+media/
+screenshots/
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.webm
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.log
