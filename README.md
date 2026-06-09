@@ -30,6 +30,13 @@ The app exposes source URLs directly in the UI. Current source references includ
 
 Comune di Milano lists DS564 as CC BY 4.0, with annual frequency, Milan geographic coverage, and temporal coverage from 2004-01-01 to 2023-12-31.
 
+## Project Links
+
+- GitHub repository: https://github.com/learnbydoingwithsteven/milan-safety
+- GitHub Pages project URL: https://learnbydoingwithsteven.github.io/milan-safety/
+- Personal page: https://learnbydoingwithsteven.github.io/
+- Linktree: https://linktr.ee/learnbydoingwithsteven
+
 ## Local Use
 
 Open `index.html` directly, or serve the folder locally:
