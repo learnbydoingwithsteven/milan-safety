@@ -37,6 +37,8 @@ const localeByLanguage = {
   it: "it-IT"
 };
 
+const allowedOfficialDataHosts = new Set(["dati.comune.milano.it"]);
+
 document.addEventListener("DOMContentLoaded", () => {
   bootstrapOfficialDashboard().catch(error => {
     console.error("Milan Safety Map failed to initialize:", error);
@@ -461,7 +463,8 @@ async function loadOfficialCrimeData() {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { cache: "no-store" });
+  const safeUrl = getAllowedOfficialDataUrl(url);
+  const response = await fetch(safeUrl, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
@@ -469,15 +472,32 @@ async function fetchJson(url) {
 }
 
 async function fetchText(url) {
-  const response = await fetch(url, { cache: "no-store" });
+  const safeUrl = getAllowedOfficialDataUrl(url);
+  const response = await fetch(safeUrl, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
   return response.text();
 }
 
+function getAllowedOfficialDataUrl(url) {
+  const parsed = new URL(url, window.location.href);
+  if (parsed.protocol !== "https:" || !allowedOfficialDataHosts.has(parsed.hostname)) {
+    throw new Error(`Blocked non-official data URL: ${parsed.href}`);
+  }
+  return parsed.href;
+}
+
 function loadJsonp(url, timeoutMs = 12000) {
   return new Promise((resolve, reject) => {
+    let safeUrl;
+    try {
+      safeUrl = getAllowedOfficialDataUrl(url);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
     const callbackName = `milanSafetyJsonp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const script = document.createElement("script");
     let settled = false;
@@ -508,7 +528,7 @@ function loadJsonp(url, timeoutMs = 12000) {
       reject(new Error("JSONP script failed"));
     };
 
-    const parsedUrl = new URL(url, window.location.href);
+    const parsedUrl = new URL(safeUrl);
     parsedUrl.searchParams.set("callback", callbackName);
     script.src = parsedUrl.href;
     document.head.appendChild(script);
