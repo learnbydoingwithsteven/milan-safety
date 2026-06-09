@@ -57,10 +57,9 @@ const localeByLanguage = {
 const allowedOfficialDataHosts = new Set(["dati.comune.milano.it"]);
 
 const newsHeatmapConfig = {
-  sourceName: "GDELT 2.1 Global Knowledge Graph snapshot",
-  docsUrl: "https://www.gdeltproject.org/data.html",
-  masterFileList: "http://data.gdeltproject.org/gdeltv2/masterfilelist.txt",
-  note: "Real GDELT GKG news-document records filtered for Milan/Milano location mentions. This is a source URL mention layer, not official incident data."
+  sourceName: "Curated source-linked Milan crime news CSV",
+  csvUrl: "20260609gptdata/milan_crime_news_2025_2026.csv",
+  note: "Real source-linked records supplied as CSV. Rows keep source_url, source, headline, publication_date, legal_status, notes, and retrieved_date. Location coordinates are processed from the CSV location fields for visualization only."
 };
 
 const newsCategories = [
@@ -568,9 +567,9 @@ function setPrimaryView(view, options = {}) {
     setText("#analytics-title", "Official Data Dashboard");
     setText("#feed-title-label", "Official Records");
   } else {
-    setText("#active-view-subtitle", "Sourced GDELT news-document heatmap with source URLs and Milan location mentions.");
+    setText("#active-view-subtitle", "Curated source-linked Milan news heatmap with inspectable URLs and processed location fields.");
     setText("#analytics-title", "News Heatmap Dashboard");
-    setText("#feed-title-label", "GDELT Source Records");
+    setText("#feed-title-label", "Source-Linked Records");
     ensureMap();
     setTimeout(() => map?.invalidateSize(), 80);
     loadNewsDataIfNeeded();
@@ -604,9 +603,9 @@ function populateControls() {
   } else {
     newsFilters.category = setSelectOptions("filter-category", newsCategories.map(row => ({ value: row.value, text: row.label })), newsFilters.category);
     newsFilters.year = setSelectOptions("filter-exact-month", [
-      { value: "all", text: "2026 recent + 2025 archive" },
-      { value: "2026", text: "2026 recent 20" },
-      { value: "2025", text: "2025 archive 40" }
+      { value: "all", text: "2026 + 2025 source records" },
+      { value: "2026", text: "2026 source records" },
+      { value: "2025", text: "2025 source records" }
     ], newsFilters.year);
 
     setText("#filters-title", "Filter News Heatmap");
@@ -672,8 +671,13 @@ function getFilteredNewsRecords() {
     const yearMatch = newsFilters.year === "all" || String(record.year) === String(newsFilters.year);
     const textMatch = !query || [
       record.title,
+      record.source,
       record.domain,
       record.locationName,
+      record.locationDetails,
+      record.crimeCategory,
+      record.legalStatus,
+      record.shortSummary,
       record.categoryLabel,
       record.dateLabel
     ].join(" ").toLowerCase().includes(query);
@@ -895,7 +899,7 @@ async function loadNewsDataIfNeeded() {
   try {
     const snapshot = window.milanNewsSnapshot;
     if (!snapshot || !Array.isArray(snapshot.items)) {
-      throw new Error("GDELT news snapshot is missing or invalid.");
+      throw new Error("Curated source-linked news snapshot is missing or invalid.");
     }
     newsRecords = snapshot.items
       .map((item, index) => normalizeSnapshotNewsItem(item, index))
@@ -939,8 +943,8 @@ function normalizeSnapshotNewsItem(item, index) {
     : (parseGdeltDate(item.dateAdded) || new Date(`${item.year || 2026}-01-01T00:00:00Z`));
   const year = Number(item.year) || date.getUTCFullYear();
   const category = newsCategories.some(row => row.value === item.category) ? item.category : "other";
-  const tier = item.dataTier || "milan-location-mention";
-  const confidence = item.confidence || (tier === "safety-theme-or-url-term" ? "matched" : "gdelt-location-mention");
+  const tier = item.dataTier || "curated-citywide-location";
+  const confidence = item.confidence || "citywide-location-field";
 
   return {
     id: item.id || `snapshot-${index}-${slugify(title)}`,
@@ -948,21 +952,29 @@ function normalizeSnapshotNewsItem(item, index) {
     titleMethod: item.titleMethod || "source URL label",
     url,
     domain: item.domain || getArticleDomain(item, url),
+    source: item.source || "",
     year,
     date,
     dateAdded: item.dateAdded || "",
     dateLabel: new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium" }).format(date),
     locationName: item.locationName || "Milano Citywide",
+    locationDetails: item.locationDetails || "",
+    locationScope: item.locationScope || "",
     lat: Number(item.lat) || 45.4642,
     lng: Number(item.lng) || 9.19,
     confidence,
     dataTier: tier,
     category,
     categoryLabel: newsCategories.find(row => row.value === category)?.label || "Other Safety News",
-    gdeltRecordId: item.gdeltRecordId || "",
-    gdeltExportUrl: item.gdeltExportUrl || "",
-    gdeltThemes: Array.isArray(item.gdeltThemes) ? item.gdeltThemes : [],
-    weight: tier === "safety-theme-or-url-term" ? 0.88 : 0.44
+    crimeCategory: item.crimeCategory || "",
+    legalStatus: item.legalStatus || "",
+    peopleOrArrests: item.peopleOrArrests || "",
+    shortSummary: item.shortSummary || "",
+    incidentDate: item.incidentDate || "",
+    retrievedDate: item.retrievedDate || "",
+    notes: item.notes || "",
+    sourceRowId: item.sourceRowId || item.id || "",
+    weight: Number(item.weight) || (tier === "curated-specific-location" ? 0.92 : 0.52)
   };
 }
 
@@ -1074,10 +1086,11 @@ function getNewsPopupHtml(item) {
       <p style="margin:0 0 8px; font-size:0.78rem; line-height:1.45;">${escapeHtml(item.title)}</p>
       <div style="display:grid; gap:4px; color:#9ca3af; font-size:0.72rem;">
         <span>${escapeHtml(item.dateLabel)} / ${escapeHtml(item.categoryLabel)}</span>
+        <span>${escapeHtml(item.source || item.domain)} / row ${escapeHtml(item.sourceRowId || item.id)}</span>
         <span>Layer type: ${escapeHtml(formatNewsTier(item.dataTier))}</span>
         <span>Location processing: ${escapeHtml(item.confidence)}</span>
+        ${item.legalStatus ? `<span>Legal status: ${escapeHtml(item.legalStatus)}</span>` : ""}
         <a href="${getSafeExternalUrl(item.url)}" target="_blank" rel="noopener noreferrer" style="color:#06b6d4;">Open source</a>
-        ${item.gdeltExportUrl ? `<a href="${getSafeExternalUrl(item.gdeltExportUrl)}" target="_blank" rel="noopener noreferrer" style="color:#06b6d4;">GDELT export CSV</a>` : ""}
       </div>
     </div>
   `;
@@ -1088,23 +1101,23 @@ function renderNewsSummary(records) {
   if (!summary) return;
 
   if (newsLoadState.status === "idle") {
-    summary.innerHTML = '<div>Open the News Heatmap view to load sourced GDELT records.</div>';
+    summary.innerHTML = '<div>Open the News Heatmap view to load curated source-linked records.</div>';
     return;
   }
 
   if (newsLoadState.status === "loading") {
     summary.innerHTML = `
       <div><strong>Loading sourced news snapshot...</strong></div>
-      <div>Reading 20 2026 and 40 2025 real GDELT GKG news-document records from the bundled source snapshot.</div>
+      <div>Reading the bundled CSV snapshot of source-linked Milan news records.</div>
     `;
     return;
   }
 
   if (newsLoadState.status === "error") {
     summary.innerHTML = `
-      <div><strong>News API error</strong></div>
+      <div><strong>News snapshot error</strong></div>
       <div>${escapeHtml(newsLoadState.error)}</div>
-      <div><a href="${getSafeExternalUrl(newsHeatmapConfig.docsUrl)}" target="_blank" rel="noopener noreferrer">GDELT data docs</a></div>
+      <div><a href="${getSafeExternalUrl(newsHeatmapConfig.csvUrl)}" target="_blank" rel="noopener noreferrer">Open source CSV</a></div>
     `;
     return;
   }
@@ -1112,19 +1125,19 @@ function renderNewsSummary(records) {
   const locationCounts = countBy(records, item => item.locationName);
   const topLocation = [...locationCounts.entries()].sort((a, b) => b[1] - a[1])[0];
   const tierCounts = countBy(records, item => formatNewsTier(item.dataTier));
-  const strictTier = tierCounts.get("Safety/theme URL match") || 0;
+  const specificTier = tierCounts.get("Specific CSV location") || 0;
   const snapshotDate = newsLoadState.fetchedAt && !Number.isNaN(newsLoadState.fetchedAt.getTime())
     ? new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" }).format(newsLoadState.fetchedAt)
     : "n/a";
   summary.innerHTML = `
-    <div><strong>${escapeHtml(formatNumber(records.length))}</strong> filtered / ${escapeHtml(formatNumber(newsRecords.length))} GDELT source records</div>
+    <div><strong>${escapeHtml(formatNumber(records.length))}</strong> filtered / ${escapeHtml(formatNumber(newsRecords.length))} source-linked records</div>
     <div>Loaded: ${escapeHtml(formatNumber(newsLoadState.received[2026]))} from 2026, ${escapeHtml(formatNumber(newsLoadState.received[2025]))} from 2025</div>
     <div>Source: ${escapeHtml(newsHeatmapConfig.sourceName)}, generated ${escapeHtml(snapshotDate)}.</div>
-    <div>Strict safety/theme matches in active filter: ${escapeHtml(formatNumber(strictTier))}; other rows are Milan-location news-document mentions.</div>
-    <div>Geography: processed from GDELT Milan location mentions and source URL place keywords; not official incident coordinates.</div>
+    <div>Rows with specific CSV location fields in active filter: ${escapeHtml(formatNumber(specificTier))}; citywide/province rows are lower-weight heat points.</div>
+    <div>Geography: processed from CSV location_details/location_scope fields; not official incident coordinates.</div>
     <div>Top filtered location: ${escapeHtml(topLocation ? `${topLocation[0]} (${topLocation[1]})` : "n/a")}</div>
-    <div><a href="${getSafeExternalUrl(newsHeatmapConfig.docsUrl)}" target="_blank" rel="noopener noreferrer">GDELT data docs</a></div>
-    <div>Experimental news-document layer only. Not official crime statistics, not incident data, and not safety advice.</div>
+    <div><a href="${getSafeExternalUrl(newsHeatmapConfig.csvUrl)}" target="_blank" rel="noopener noreferrer">Open source CSV</a></div>
+    <div>Experimental news layer only. Allegations and legal statuses are source-reported; not official crime statistics, not incident data, and not safety advice.</div>
   `;
 }
 
@@ -1137,11 +1150,11 @@ function renderNewsFeed(records) {
     return;
   }
   if (newsLoadState.status === "error") {
-    feed.innerHTML = `<div class="feed-empty-state">News load failed. <a href="${getSafeExternalUrl(newsHeatmapConfig.docsUrl)}" target="_blank" rel="noopener noreferrer">Open GDELT docs</a></div>`;
+    feed.innerHTML = `<div class="feed-empty-state">News load failed. <a href="${getSafeExternalUrl(newsHeatmapConfig.csvUrl)}" target="_blank" rel="noopener noreferrer">Open source CSV</a></div>`;
     return;
   }
   if (!records.length) {
-    feed.innerHTML = '<div class="feed-empty-state">No GDELT source records match the active filters.</div>';
+    feed.innerHTML = '<div class="feed-empty-state">No source-linked records match the active filters.</div>';
     return;
   }
 
@@ -1154,13 +1167,14 @@ function renderNewsFeed(records) {
       <p class="feed-card-desc">${escapeHtml(item.title)}</p>
       <div class="feed-card-meta">
         <span>${escapeHtml(item.categoryLabel)}</span>
-        <span>${escapeHtml(item.domain)}</span>
+        <span>${escapeHtml(item.source || item.domain)}</span>
+        ${item.peopleOrArrests ? `<span>${escapeHtml(item.peopleOrArrests)}</span>` : ""}
         <span>${escapeHtml(formatNewsTier(item.dataTier))}</span>
         <span>Location: ${escapeHtml(item.confidence)}</span>
       </div>
       <div class="feed-card-sources">
         <a href="${getSafeExternalUrl(item.url)}" target="_blank" rel="noopener noreferrer">Open source</a>
-        ${item.gdeltExportUrl ? `<a href="${getSafeExternalUrl(item.gdeltExportUrl)}" target="_blank" rel="noopener noreferrer">GDELT CSV</a>` : ""}
+        <a href="${getSafeExternalUrl(newsHeatmapConfig.csvUrl)}" target="_blank" rel="noopener noreferrer">CSV row</a>
       </div>
     </div>
   `).join("");
@@ -1185,7 +1199,7 @@ function populateNewsTicker(records) {
     return;
   }
   if (newsLoadState.status === "loading") {
-    ticker.textContent = "Loading sourced GDELT news-document snapshot...";
+    ticker.textContent = "Loading curated source-linked news snapshot...";
     return;
   }
   if (newsLoadState.status === "error") {
@@ -1196,7 +1210,7 @@ function populateNewsTicker(records) {
     .slice(0, 12)
     .map(item => `${item.dateLabel}: ${item.domain} / ${item.locationName} / ${formatNewsTier(item.dataTier)}`)
     .join("  /  ");
-  ticker.textContent = headlines || "No sourced GDELT records loaded yet.";
+  ticker.textContent = headlines || "No source-linked records loaded yet.";
 }
 
 function countBy(items, keyFn) {
@@ -1209,9 +1223,10 @@ function countBy(items, keyFn) {
 }
 
 function formatNewsTier(tier) {
-  return tier === "safety-theme-or-url-term"
-    ? "Safety/theme URL match"
-    : "Milan-location mention";
+  if (tier === "curated-specific-location") return "Specific CSV location";
+  if (tier === "curated-metropolitan-location") return "Metro/province CSV location";
+  if (tier === "curated-citywide-location") return "Citywide CSV location";
+  return "Source-linked record";
 }
 
 function populateSourceLinks() {
@@ -1220,8 +1235,7 @@ function populateSourceLinks() {
 
   const sources = activePrimaryView === "news"
     ? [
-        { name: "GDELT GKG Docs", url: newsHeatmapConfig.docsUrl },
-        { name: "GDELT Master File List", url: newsHeatmapConfig.masterFileList },
+        { name: "Source CSV", url: newsHeatmapConfig.csvUrl },
         { name: "OpenStreetMap", url: "https://www.openstreetmap.org/copyright" },
         { name: "CARTO Basemap", url: "https://carto.com/attributions" }
       ]
