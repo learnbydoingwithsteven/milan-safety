@@ -244,6 +244,12 @@ select.filter-select:focus {
   background: rgba(18, 20, 26, 0.95);
 }
 
+select.filter-select:disabled,
+input[type="range"].hour-slider:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .select-wrapper::after {
   content: '▼';
   font-size: 8px;
@@ -524,6 +530,11 @@ select.filter-select:focus {
   box-shadow: var(--shadow-glow);
 }
 
+.seg-btn.unavailable {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
 .exact-month-group {
   display: none;
 }
@@ -545,6 +556,16 @@ select.filter-select:focus {
 }
 
 .data-source-summary strong {
+  color: #fff;
+}
+
+.data-source-summary a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+}
+
+.data-source-summary a:hover,
+.data-source-summary a:focus-visible {
   color: #fff;
 }
 
@@ -1006,6 +1027,25 @@ a.citation-badge {
 .feed-card-sources a:focus-visible {
   color: #fff;
   border-color: rgba(6, 182, 212, 0.5);
+}
+
+.feed-empty-state {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.feed-empty-state a {
+  color: var(--accent-cyan);
+  text-decoration: none;
+}
+
+.feed-empty-state a:hover,
+.feed-empty-state a:focus-visible {
+  color: #fff;
 }
 
 /* 5. Bottom News Ticker HUD Widget */

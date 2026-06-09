@@ -1,58 +1,94 @@
 // milan-safety/app.js
 
-// Global variables for Map, Layers and Dashboard
 let map;
-let activeLanguage = 'en';
-let activeViewMode = 'heatmap'; // 'heatmap', 'bubbleMap', 'choroplethMap', 'markerPins'
+let activeLanguage = "en";
+let activeViewMode = "heatmap";
+let activeTemporalView = "exactMonth";
 let activeFilters = {
-  category: 'all',
-  severity: 'all',
-  hour: -1 // -1 means All Hours
+  category: "all",
+  year: "all"
 };
-let feedSearchQuery = '';
-let activeTemporalView = 'hour';
-let activeExactMonth = 'all';
+let feedSearchQuery = "";
 
-// Layer groups for Leaflet overlays
+let officialRecords = [];
+let officialLoadState = {
+  status: "idle",
+  error: "",
+  fetchedAt: null,
+  method: "",
+  rawCount: 0
+};
+
 let heatmapLayerGroup;
 let bubbleLayerGroup;
 let choroplethLayerGroup;
 let markerLayerGroup;
 
-// Chart references
 let categoryChart;
 let hourlyChart;
 let districtChart;
 let mapReady = false;
 let chartsReady = false;
+let activeCityPopup = null;
 
-// Document Ready Initialization
-document.addEventListener('DOMContentLoaded', () => {
-  try {
-    initLanguage();
-    initMap();
-    initCharts();
-    populateSourceLinks();
-    populateExactMonthOptions();
-    setupEventListeners();
-    populateNewsTicker();
-    applyFiltersAndRender();
-  } catch (error) {
-    console.error('Milan Safety Map failed to initialize:', error);
+const localeByLanguage = {
+  en: "en-US",
+  zh: "zh-CN",
+  it: "it-IT"
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  bootstrapOfficialDashboard().catch(error => {
+    console.error("Milan Safety Map failed to initialize:", error);
+    officialLoadState = {
+      ...officialLoadState,
+      status: "error",
+      error: error.message || String(error)
+    };
     showMapFallback(
-      'Unable to initialize the dashboard',
-      'Check the browser console for details. The incident feed and controls will recover automatically once the data and libraries are available.'
+      t("loadFailed", "Official data could not be loaded"),
+      officialLoadState.error
     );
-  }
+    updateDataSourceSummary([]);
+    updateOfficialRecordList([]);
+  });
 });
 
-// Initialize Language from local storage
+async function bootstrapOfficialDashboard() {
+  initLanguage();
+  initMap();
+  initCharts();
+  setupEventListeners();
+  updateLanguageUI();
+  lockUnavailableControls();
+  populateSourceLinks();
+  populateNewsTicker();
+  renderLoadingState();
+
+  await loadOfficialCrimeData();
+
+  populateFilterOptions();
+  updateLanguageUI();
+  applyFiltersAndRender();
+}
+
 function initLanguage() {
-  const savedLang = localStorage.getItem('milan_safety_lang');
-  if (savedLang && ['en', 'zh', 'it'].includes(savedLang)) {
+  const savedLang = localStorage.getItem("milan_safety_lang");
+  if (savedLang && ["en", "zh", "it"].includes(savedLang)) {
     activeLanguage = savedLang;
   }
-  updateLanguageUI();
+}
+
+function t(key, fallback) {
+  return (translationDictionary[activeLanguage] && translationDictionary[activeLanguage][key])
+    || translationDictionary.en[key]
+    || fallback
+    || key;
+}
+
+function setText(selector, text) {
+  const element = document.querySelector(selector);
+  if (element) element.textContent = text;
 }
 
 function setInlineTitleText(selector, text) {
@@ -70,151 +106,163 @@ function setInlineTitleText(selector, text) {
   }
 }
 
-function t(key, fallback) {
-  return (translationDictionary[activeLanguage] && translationDictionary[activeLanguage][key])
-    || translationDictionary.en[key]
-    || fallback
-    || key;
-}
-
 function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, char => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
   })[char]);
 }
 
 function getSafeExternalUrl(url) {
   try {
     const parsed = new URL(url, window.location.href);
-    return ['http:', 'https:'].includes(parsed.protocol) ? parsed.href : '#';
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "#";
   } catch {
-    return '#';
+    return "#";
   }
 }
 
-// Update UI Text elements based on activeLanguage
 function updateLanguageUI() {
-  const dict = translationDictionary[activeLanguage] || translationDictionary.en;
-  
-  // Set browser title
-  document.title = dict.appTitle;
-  
-  // Brand Header
-  document.querySelector('.brand-title').textContent = dict.appTitle;
-  document.querySelector('.brand-subtitle').textContent = dict.appSubtitle;
-  
-  // View mode section
-  setInlineTitleText('#view-mode-title', dict.viewMode);
-  document.querySelector('#btn-heatmap span').textContent = dict.heatmap;
-  document.querySelector('#btn-bubble span').textContent = dict.bubbleMap;
-  document.querySelector('#btn-choropleth span').textContent = dict.choroplethMap;
-  document.querySelector('#btn-marker span').textContent = dict.markerPins;
-  
-  // Filters section
-  setInlineTitleText('#filters-title', dict.filterTitle);
-  document.querySelector('#label-category').textContent = dict.categoryLabel;
-  document.querySelector('#label-severity').textContent = dict.severityLabel;
-  document.querySelector('#label-time').textContent = dict.timeLabel;
-  
-  // Provenance metadata section
-  setInlineTitleText('#provenance-title', dict.provenanceTitle);
-  document.querySelector('#provenance-desc').textContent = dict.provenanceDesc;
-  document.querySelector('#cites-label').textContent = dict.citesLabel;
-  
-  // Ticker title
-  document.querySelector('#news-ticker-tag-text').textContent = dict.newsTickerTitle;
-  
-  // Right Panel Title Feed
-  setInlineTitleText('#analytics-title', dict.analyticsTitle);
-  setInlineTitleText('#feed-title-label', dict.feedTitle);
-  document.querySelector('#feed-search').placeholder = dict.feedPlaceholder;
-  setInlineTitleText('#data-view-title', t('dataViewTitle', 'Data View'));
-  document.querySelector('#time-view-hour').textContent = t('byHour', 'Hour');
-  document.querySelector('#time-view-day').textContent = t('byDayOfMonth', 'Day');
-  document.querySelector('#time-view-month').textContent = t('byMonthOfYear', 'Month');
-  document.querySelector('#time-view-exact').textContent = t('exactMonth', 'Exact Month');
-  document.querySelector('#label-exact-month').textContent = t('exactMonthLabel', 'Exact month');
-  
-  // Category Select Options
-  updateDropdownOptions('filter-category', [
-    { value: 'all', text: dict.allCategories },
-    { value: 'theft', text: dict.theft },
-    { value: 'assault', text: dict.assault },
-    { value: 'drugRelated', text: dict.drugRelated },
-    { value: 'vandalism', text: dict.vandalism },
-    { value: 'harassment', text: dict.harassment }
-  ]);
-  
-  updateDropdownOptions('filter-severity', [
-    { value: 'all', text: dict.allSeverities },
-    { value: 'low', text: dict.low },
-    { value: 'medium', text: dict.medium },
-    { value: 'high', text: dict.high }
-  ]);
-  
-  // Legend Panel
-  document.querySelector('#legend-title-text').textContent = dict.legendTitle;
-  document.querySelector('#legend-desc-low').textContent = dict.lowRiskDesc;
-  document.querySelector('#legend-desc-med').textContent = dict.medRiskDesc;
-  document.querySelector('#legend-desc-high').textContent = dict.highRiskDesc;
-  
-  // Highlight active language button
-  document.querySelectorAll('.lang-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.lang === activeLanguage);
+  document.title = t("appTitle", "Milan Safety Map");
+
+  setText(".brand-title", t("appTitle", "Milan Safety Map"));
+  setText(".brand-subtitle", t("appSubtitle", "Official annual data from Comune di Milano"));
+
+  setInlineTitleText("#view-mode-title", t("viewMode", "Map Scope"));
+  setText("#btn-heatmap span", t("heatmap", "City Total"));
+  setText("#btn-bubble span", t("bubbleMap", "Source Scope"));
+  setText("#btn-choropleth span", t("choroplethMap", "Data Coverage"));
+  setText("#btn-marker span", t("markerPins", "No Incident Pins"));
+
+  setInlineTitleText("#filters-title", t("filterTitle", "Inspect Official Data"));
+  setText("#label-category", t("categoryLabel", "Crime type"));
+  setText("#label-severity", t("severityLabel", "Granularity"));
+  setText("#label-time", t("timeLabel", "Hour filter is not available in this source"));
+
+  setInlineTitleText("#provenance-title", t("provenanceTitle", "Official Data Provenance"));
+  setText("#provenance-desc", t("provenanceDesc", ""));
+  setText("#cites-label", t("citesLabel", "Official Citations:"));
+  setText("#news-ticker-tag-text", t("newsTickerTitle", "OFFICIAL DATA NOTICE"));
+
+  setInlineTitleText("#analytics-title", t("analyticsTitle", "Official Data Dashboard"));
+  setInlineTitleText("#feed-title-label", t("feedTitle", "Official Records"));
+  const searchInput = document.getElementById("feed-search");
+  if (searchInput) searchInput.placeholder = t("feedPlaceholder", "Search records...");
+
+  setInlineTitleText("#data-view-title", t("dataViewTitle", "Data View"));
+  setText("#time-view-hour", t("byHour", "Hour N/A"));
+  setText("#time-view-day", t("byDayOfMonth", "Day N/A"));
+  setText("#time-view-month", t("byMonthOfYear", "Month N/A"));
+  setText("#time-view-exact", t("exactMonth", "Year"));
+  setText("#label-exact-month", t("exactMonthLabel", "Official year"));
+
+  setText("#legend-title-text", t("legendTitle", "Official Data Scope"));
+  setText("#legend-desc-low", t("lowRiskDesc", "Annual aggregate"));
+  setText("#legend-desc-med", t("medRiskDesc", "Counts by year and crime type"));
+  setText("#legend-desc-high", t("highRiskDesc", "No incident coordinates"));
+
+  setText("#chart-title-cat", t("crimeTypeTitle", "Crime Type Breakdown"));
+  setText("#chart-title-time", t("annualTrendTitle", "Annual Trend"));
+  setText("#chart-title-district", t("sourceScopeTitle", "Source Coverage and Fields"));
+
+  document.querySelectorAll(".lang-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.lang === activeLanguage);
   });
-  
-  // Update hour slider label readout
-  updateHourSliderReadout();
+
+  populateFilterOptions();
   populateSourceLinks();
-  populateExactMonthOptions();
+  updateHourSliderReadout();
   updateTemporalControlsUI();
 }
 
-// Update option elements in filter selects
-function updateDropdownOptions(id, options) {
-  const select = document.getElementById(id);
-  const currentValue = select.value;
-  select.innerHTML = '';
-  options.forEach(opt => {
-    const el = document.createElement('option');
-    el.value = opt.value;
-    el.textContent = opt.text;
-    select.appendChild(el);
-  });
-  select.value = currentValue;
-  if (!select.value) select.value = 'all';
+function lockUnavailableControls() {
+  const severitySelect = document.getElementById("filter-severity");
+  if (severitySelect) {
+    setSelectOptions("filter-severity", [
+      { value: "all", text: t("allSeverities", "Annual city aggregate") },
+      { value: "street", text: t("low", "Street level not available") },
+      { value: "hour", text: t("medium", "Hour level not available") },
+      { value: "pin", text: t("high", "Incident pins not available") }
+    ], "all");
+    severitySelect.disabled = true;
+    severitySelect.title = officialCrimeDataset.granularity;
+  }
+
+  const hourSlider = document.getElementById("filter-hour");
+  if (hourSlider) {
+    hourSlider.value = "-1";
+    hourSlider.disabled = true;
+    hourSlider.title = t("timeLabel", "Hour filter is not available in this source");
+  }
 }
 
-// Initialize Leaflet Map
+function setSelectOptions(id, options, selectedValue) {
+  const select = document.getElementById(id);
+  if (!select) return selectedValue;
+
+  const fallback = options.some(option => option.value === selectedValue)
+    ? selectedValue
+    : (options[0] && options[0].value) || "all";
+
+  select.innerHTML = "";
+  options.forEach(option => {
+    const element = document.createElement("option");
+    element.value = option.value;
+    element.textContent = option.text;
+    select.appendChild(element);
+  });
+  select.value = fallback;
+  return fallback;
+}
+
+function populateFilterOptions() {
+  const crimeTypes = getCrimeTypeTotals(officialRecords)
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type, getLocale()))
+    .map(row => row.type);
+
+  activeFilters.category = setSelectOptions("filter-category", [
+    { value: "all", text: t("allCategories", "All Crime Types") },
+    ...crimeTypes.map(type => ({ value: type, text: type }))
+  ], activeFilters.category);
+
+  const years = getAvailableYears();
+  activeFilters.year = setSelectOptions("filter-exact-month", [
+    { value: "all", text: t("allMonths", "All Years") },
+    ...years.map(year => ({ value: String(year), text: String(year) }))
+  ], activeFilters.year);
+
+  lockUnavailableControls();
+}
+
+function getLocale() {
+  return localeByLanguage[activeLanguage] || "en-US";
+}
+
 function initMap() {
-  if (typeof L === 'undefined') {
+  if (typeof L === "undefined") {
     mapReady = false;
     showMapFallback(
-      'Interactive map assets did not load',
-      'Leaflet is unavailable, so the page is showing a local incident summary instead of the live map.'
+      "Interactive map assets did not load",
+      "Leaflet is unavailable, so only the official records and source links can be inspected."
     );
     return;
   }
 
-  const milanCoordinates = [45.474, 9.182];
-  map = L.map('map', {
+  map = L.map("map", {
     zoomControl: true,
-    minZoom: 11,
+    minZoom: 10,
     maxZoom: 16
-  }).setView(milanCoordinates, 12.5);
+  }).setView([milanOfficialArea.lat, milanOfficialArea.lng], 12);
 
-  // CartoDB Dark Matter tile layer
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: 'abcd',
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors &copy; <a href=\"https://carto.com/attributions\">CARTO</a>",
+    subdomains: "abcd",
     maxZoom: 20
   }).addTo(map);
 
-  // Initialize Layer Groups
   heatmapLayerGroup = L.layerGroup().addTo(map);
   bubbleLayerGroup = L.layerGroup();
   choroplethLayerGroup = L.layerGroup();
@@ -222,31 +270,25 @@ function initMap() {
   mapReady = true;
 }
 
-// Initialize Chart.js Dashboards
 function initCharts() {
-  if (typeof Chart === 'undefined') {
+  if (typeof Chart === "undefined") {
     chartsReady = false;
-    renderChartFallbacks(safetyIncidents);
     return;
   }
 
-  const ctxCategory = document.getElementById('categoryChart').getContext('2d');
-  const ctxHourly = document.getElementById('hourlyChart').getContext('2d');
-  const ctxDistrict = document.getElementById('districtChart').getContext('2d');
-
-  Chart.defaults.color = '#9ca3af';
+  Chart.defaults.color = "#9ca3af";
   Chart.defaults.font.family = "'Plus Jakarta Sans', sans-serif";
   Chart.defaults.font.size = 11;
 
-  categoryChart = new Chart(ctxCategory, {
-    type: 'doughnut',
+  categoryChart = new Chart(document.getElementById("categoryChart").getContext("2d"), {
+    type: "doughnut",
     data: {
       labels: [],
       datasets: [{
         data: [],
-        backgroundColor: ['#a855f7', '#ef4444', '#f59e0b', '#06b6d4', '#3b82f6'],
+        backgroundColor: ["#06b6d4", "#f59e0b", "#10b981", "#3b82f6", "#ef4444", "#a855f7", "#14b8a6", "#f97316"],
         borderWidth: 1,
-        borderColor: '#12151c'
+        borderColor: "#12151c"
       }]
     },
     options: {
@@ -254,26 +296,31 @@ function initCharts() {
       maintainAspectRatio: false,
       plugins: {
         legend: {
-          position: 'bottom',
+          position: "bottom",
           labels: {
             boxWidth: 9,
             padding: 10,
             font: { size: 10 }
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: context => `${context.label}: ${formatNumber(context.parsed)}`
           }
         }
       }
     }
   });
 
-  hourlyChart = new Chart(ctxHourly, {
-    type: 'bar',
+  hourlyChart = new Chart(document.getElementById("hourlyChart").getContext("2d"), {
+    type: "bar",
     data: {
       labels: [],
       datasets: [{
-        label: '',
+        label: t("totalIncidents", "Reported offences"),
         data: [],
-        backgroundColor: 'rgba(6, 182, 212, 0.45)',
-        borderColor: '#06b6d4',
+        backgroundColor: "rgba(6, 182, 212, 0.45)",
+        borderColor: "#06b6d4",
         borderWidth: 1.5,
         borderRadius: 4
       }]
@@ -282,702 +329,943 @@ function initCharts() {
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        y: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
+        y: {
+          beginAtZero: true,
+          grid: { color: "rgba(255, 255, 255, 0.05)" },
+          ticks: { callback: value => formatCompactNumber(value) }
+        },
         x: { grid: { display: false } }
       },
-      plugins: { legend: { display: false } }
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: context => `${t("totalIncidents", "Reported offences")}: ${formatNumber(context.parsed.y)}`
+          }
+        }
+      }
     }
   });
 
-  districtChart = new Chart(ctxDistrict, {
-    type: 'bar',
+  districtChart = new Chart(document.getElementById("districtChart").getContext("2d"), {
+    type: "bar",
     data: {
       labels: [],
       datasets: [{
-        label: '',
+        label: t("sourceScopeTitle", "Source Coverage and Fields"),
         data: [],
         backgroundColor: [],
         borderRadius: 4
       }]
     },
     options: {
-      indexAxis: 'y',
+      indexAxis: "y",
       responsive: true,
       maintainAspectRatio: false,
       scales: {
-        x: { beginAtZero: true, grid: { color: 'rgba(255, 255, 255, 0.05)' } },
+        x: {
+          beginAtZero: true,
+          grid: { color: "rgba(255, 255, 255, 0.05)" },
+          ticks: { precision: 0 }
+        },
         y: { grid: { display: false } }
       },
-      plugins: { legend: { display: false } }
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: context => `${context.label}: ${formatNumber(context.parsed.x)}`
+          }
+        }
+      }
     }
   });
 
   chartsReady = true;
 }
 
-// Primary Data Pipeline: filter data, re-draw map layers and metrics
-function applyFiltersAndRender() {
-  // 1. Filter incidents by category, severity, hour slider, and search details
-  const filteredData = safetyIncidents.filter(incident => {
-    const catMatch = activeFilters.category === 'all' || incident.category === activeFilters.category;
-    const sevMatch = activeFilters.severity === 'all' || incident.severity === activeFilters.severity;
-    const hourMatch = activeFilters.hour === -1 || getIncidentHour(incident) === activeFilters.hour;
-    const monthMatch = activeTemporalView !== 'exactMonth'
-      || activeExactMonth === 'all'
-      || getIncidentMonthKey(incident) === activeExactMonth;
-    
-    // Fuzzy text search
-    let textMatch = true;
-    if (feedSearchQuery) {
-      const detailsText = (incident.details[activeLanguage] || incident.details['en']).toLowerCase();
-      textMatch = detailsText.includes(feedSearchQuery.toLowerCase());
-    }
-
-    return catMatch && sevMatch && hourMatch && monthMatch && textMatch;
-  });
-
-  // 2. Render Map layer
-  renderMapLayer(filteredData);
-
-  // 3. Update Charts
-  updateChartsData(filteredData);
-
-  // 4. Update Sidebar incident feed list
-  updateIncidentFeedList(filteredData);
-
-  // 5. Update data source and filter summary
-  updateDataSourceSummary(filteredData);
-}
-
-function getIncidentHour(incident) {
-  const hour = Number(incident.hour);
-  if (!Number.isFinite(hour)) return 0;
-  return ((Math.trunc(hour) % 24) + 24) % 24;
-}
-
-function formatIncidentHour(incident) {
-  return `${String(getIncidentHour(incident)).padStart(2, '0')}:00`;
-}
-
-function getIncidentDate(incident) {
-  const date = new Date(incident.timestamp);
-  return Number.isNaN(date.getTime()) ? new Date('2026-06-01T00:00:00Z') : date;
-}
-
-function getIncidentDayOfMonth(incident) {
-  return getIncidentDate(incident).getUTCDate();
-}
-
-function getIncidentMonthIndex(incident) {
-  return getIncidentDate(incident).getUTCMonth();
-}
-
-function getIncidentMonthKey(incident) {
-  const date = getIncidentDate(incident);
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
-}
-
-function getAvailableMonthKeys() {
-  return [...new Set(safetyIncidents.map(getIncidentMonthKey))].sort();
-}
-
-function formatMonthLabel(monthKey) {
-  if (monthKey === 'all') return t('allMonths', 'All Months');
-  const [year, month] = monthKey.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, 1));
-  return new Intl.DateTimeFormat(activeLanguage === 'it' ? 'it-IT' : activeLanguage === 'zh' ? 'zh-CN' : 'en-US', {
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC'
-  }).format(date);
-}
-
-function formatIncidentDate(incident) {
-  const date = getIncidentDate(incident);
-  return new Intl.DateTimeFormat(activeLanguage === 'it' ? 'it-IT' : activeLanguage === 'zh' ? 'zh-CN' : 'en-US', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'UTC'
-  }).format(date);
-}
-
-// Render selected Map Layer style
-function renderMapLayer(incidents) {
-  if (!mapReady || !map) {
-    renderStaticMapFallback(incidents);
-    return;
+function renderLoadingState() {
+  const feedContainer = document.getElementById("incident-feed-items");
+  if (feedContainer) {
+    feedContainer.innerHTML = "";
+    const loading = document.createElement("div");
+    loading.className = "feed-empty-state";
+    loading.textContent = t("loadingData", "Loading official data...");
+    feedContainer.appendChild(loading);
   }
-
-  // Clear all layers
-  heatmapLayerGroup.clearLayers();
-  bubbleLayerGroup.clearLayers();
-  choroplethLayerGroup.clearLayers();
-  markerLayerGroup.clearLayers();
-  
-  // Remove layer groups from map
-  map.removeLayer(heatmapLayerGroup);
-  map.removeLayer(bubbleLayerGroup);
-  map.removeLayer(choroplethLayerGroup);
-  map.removeLayer(markerLayerGroup);
-
-  const dict = translationDictionary[activeLanguage] || translationDictionary.en;
-
-  if (activeViewMode === 'heatmap') {
-    const points = incidents.map(item => {
-      let weight = 0.4;
-      if (item.severity === 'medium') weight = 0.7;
-      if (item.severity === 'high') weight = 1.0;
-      return [item.lat, item.lng, weight];
-    });
-
-    if (typeof L.heatLayer === 'function') {
-      const heatLayer = L.heatLayer(points, {
-        radius: 25,
-        blur: 18,
-        maxZoom: 15,
-        gradient: {
-          0.2: '#10b981', // green
-          0.5: '#f59e0b', // orange
-          0.9: '#ef4444'  // red
-        }
-      });
-      heatmapLayerGroup.addLayer(heatLayer);
-    } else {
-      incidents.forEach(item => {
-        const color = item.severity === 'high' ? '#ef4444' : item.severity === 'medium' ? '#f59e0b' : '#10b981';
-        heatmapLayerGroup.addLayer(L.circleMarker([item.lat, item.lng], {
-          radius: item.severity === 'high' ? 9 : 6,
-          color,
-          fillColor: color,
-          fillOpacity: 0.32,
-          weight: 1
-        }));
-      });
-    }
-    heatmapLayerGroup.addTo(map);
-
-  } else if (activeViewMode === 'bubbleMap') {
-    const districtStats = {};
-    milanDistricts.forEach(d => {
-      districtStats[d.id] = { ...d, count: 0 };
-    });
-
-    incidents.forEach(item => {
-      if (districtStats[item.district]) {
-        districtStats[item.district].count++;
-      }
-    });
-
-    Object.values(districtStats).forEach(district => {
-      if (district.count === 0) return;
-
-      const radius = Math.sqrt(district.count) * 85 + 40;
-      let color = 'rgba(16, 185, 129, 0.4)';
-      let border = '#10b981';
-      
-      if (district.baseRisk > 7.0) {
-        color = 'rgba(239, 68, 68, 0.4)';
-        border = '#ef4444';
-      } else if (district.baseRisk > 4.5) {
-        color = 'rgba(245, 158, 11, 0.4)';
-        border = '#f59e0b';
-      }
-
-      const districtName = activeLanguage === 'zh' ? district.nameZh : activeLanguage === 'it' ? district.nameIt : district.nameEn;
-
-      const bubble = L.circle([district.lat, district.lng], {
-        color: border,
-        fillColor: color,
-        fillOpacity: 0.65,
-        radius: radius,
-        weight: 1.5
-      });
-
-      bubble.bindPopup(`
-        <div style="font-family: var(--font-main); min-width: 140px;">
-          <h4 style="color: #fff; margin-bottom: 4px;">${escapeHtml(districtName)}</h4>
-          <p style="margin: 0; font-size: 0.78rem;">
-            ${dict.totalIncidents}: <strong>${district.count}</strong>
-          </p>
-          <div style="margin-top: 6px; font-size: 0.7rem; color: #9ca3af;">
-            ${dict.districtRiskIndex}: ${district.baseRisk}
-          </div>
-        </div>
-      `);
-
-      bubbleLayerGroup.addLayer(bubble);
-    });
-
-    bubbleLayerGroup.addTo(map);
-
-  } else if (activeViewMode === 'choroplethMap') {
-    // Shading polygons for each district according to safety density
-    const districtIncidentsCount = {};
-    milanDistricts.forEach(d => {
-      districtIncidentsCount[d.id] = 0;
-    });
-
-    incidents.forEach(item => {
-      if (districtIncidentsCount[item.district] !== undefined) {
-        districtIncidentsCount[item.district]++;
-      }
-    });
-
-    milanDistricts.forEach(district => {
-      const count = districtIncidentsCount[district.id];
-      const coords = generateDistrictPolygonCoords(district.lat, district.lng, district.baseRisk);
-      
-      // Determine colors based on active incident volume
-      let fillColor = '#10b981'; // Green
-      if (count > 12) {
-        fillColor = '#ef4444'; // Red
-      } else if (count > 4) {
-        fillColor = '#f59e0b'; // Orange
-      }
-
-      const districtName = activeLanguage === 'zh' ? district.nameZh : activeLanguage === 'it' ? district.nameIt : district.nameEn;
-
-      const polygon = L.polygon(coords, {
-        color: 'rgba(255, 255, 255, 0.15)',
-        fillColor: fillColor,
-        fillOpacity: 0.25,
-        weight: 1.5,
-        className: 'choropleth-poly'
-      });
-
-      polygon.bindPopup(`
-        <div style="font-family: var(--font-main); min-width: 140px;">
-          <h4 style="color: #fff; margin-bottom: 4px;">${escapeHtml(districtName)}</h4>
-          <p style="margin: 0; font-size: 0.78rem;">
-            ${dict.totalIncidents}: <strong>${count}</strong>
-          </p>
-          <div style="margin-top: 6px; font-size: 0.7rem; color: #9ca3af;">
-            ${dict.districtRiskIndex}: ${district.baseRisk}
-          </div>
-        </div>
-      `);
-
-      choroplethLayerGroup.addLayer(polygon);
-    });
-
-    choroplethLayerGroup.addTo(map);
-
-  } else if (activeViewMode === 'markerPins') {
-    incidents.forEach(item => {
-      let pinColor = '#a855f7';
-      if (item.category === 'assault') pinColor = '#ef4444';
-      if (item.category === 'drugRelated') pinColor = '#f59e0b';
-      if (item.category === 'vandalism') pinColor = '#06b6d4';
-      if (item.category === 'harassment') pinColor = '#3b82f6';
-
-      const customIcon = L.divIcon({
-        className: 'glow-pin',
-        html: `<div style="background-color: ${pinColor}; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 8px ${pinColor};"></div>`,
-        iconSize: [12, 12],
-        iconAnchor: [6, 6]
-      });
-
-      const marker = L.marker([item.lat, item.lng], { icon: customIcon });
-      const itemDesc = item.details[activeLanguage] || item.details['en'];
-      const catText = dict[item.category] || item.category;
-
-      marker.bindPopup(`
-        <div style="min-width: 180px;">
-          <h4 style="color:#fff; margin-bottom:6px;">${escapeHtml(catText)}</h4>
-          <p style="margin-bottom:8px; font-size:0.78rem; line-height:1.4;">${escapeHtml(itemDesc)}</p>
-          <div class="popup-meta">
-            <span class="meta-badge badge-${escapeHtml(item.category)}">${escapeHtml(catText)}</span>
-            <span style="color:#9ca3af; font-size:0.7rem; align-self:center;">
-              ${formatIncidentHour(item)}
-            </span>
-          </div>
-        </div>
-      `);
-
-      markerLayerGroup.addLayer(marker);
-      item.markerRef = marker; // save reference for card click linking
-    });
-
-    markerLayerGroup.addTo(map);
-  }
+  updateDataSourceSummary([]);
 }
 
-// Update dashboard statistics charts
-function updateChartsData(incidents) {
-  if (!chartsReady || !categoryChart || !hourlyChart || !districtChart) {
-    renderChartFallbacks(incidents);
-    return;
-  }
+async function loadOfficialCrimeData() {
+  officialLoadState = {
+    status: "loading",
+    error: "",
+    fetchedAt: null,
+    method: "",
+    rawCount: 0
+  };
 
-  const dict = translationDictionary[activeLanguage] || translationDictionary.en;
-
-  // 1. Update Category Chart
-  const categoryCounts = { theft: 0, assault: 0, drugRelated: 0, vandalism: 0, harassment: 0 };
-  incidents.forEach(item => {
-    if (categoryCounts[item.category] !== undefined) {
-      categoryCounts[item.category]++;
+  const attempts = [
+    {
+      label: "CKAN Data API fetch",
+      run: () => fetchJson(officialCrimeDataset.apiUrl)
+    },
+    {
+      label: "CKAN Data API JSONP",
+      run: () => loadJsonp(officialCrimeDataset.apiUrl)
+    },
+    {
+      label: "Official JSON file fetch",
+      run: () => fetchJson(officialCrimeDataset.jsonUrl)
+    },
+    {
+      label: "Official CSV file fetch",
+      run: async () => parseDelimitedRows(await fetchText(officialCrimeDataset.csvUrl))
     }
-  });
-
-  categoryChart.data.labels = [dict.theft, dict.assault, dict.drugRelated, dict.vandalism, dict.harassment];
-  categoryChart.data.datasets[0].data = [
-    categoryCounts.theft,
-    categoryCounts.assault,
-    categoryCounts.drugRelated,
-    categoryCounts.vandalism,
-    categoryCounts.harassment
   ];
-  categoryChart.update();
 
-  // 2. Update time chart by the active temporal view
-  const temporalSeries = getTemporalSeries(incidents);
-  document.getElementById('chart-title-time').textContent = temporalSeries.title;
-  hourlyChart.data.labels = temporalSeries.labels;
-  hourlyChart.data.datasets[0].label = dict.totalIncidents;
-  hourlyChart.data.datasets[0].data = temporalSeries.values;
-  hourlyChart.update();
-
-  // 3. Update District Index Chart
-  const sortedDistricts = [...milanDistricts].sort((a, b) => b.baseRisk - a.baseRisk);
-  
-  districtChart.data.labels = sortedDistricts.map(d => {
-    return activeLanguage === 'zh' ? d.nameZh : activeLanguage === 'it' ? d.nameIt : d.nameEn;
-  });
-  
-  districtChart.data.datasets[0].label = dict.districtRiskIndex;
-  districtChart.data.datasets[0].data = sortedDistricts.map(d => d.baseRisk);
-  
-  districtChart.data.datasets[0].backgroundColor = sortedDistricts.map(d => {
-    if (d.baseRisk > 7.0) return 'rgba(239, 68, 68, 0.7)';
-    if (d.baseRisk > 4.5) return 'rgba(245, 158, 11, 0.7)';
-    return 'rgba(16, 185, 129, 0.7)';
-  });
-  
-  districtChart.update();
-}
-
-function getTemporalSeries(incidents) {
-  if (activeTemporalView === 'dayOfMonth') {
-    const counts = Array(31).fill(0);
-    incidents.forEach(item => {
-      counts[getIncidentDayOfMonth(item) - 1]++;
-    });
-
-    return {
-      title: 'Incident Volume by Day of Month',
-      labels: Array.from({ length: 31 }, (_, i) => `${i + 1}`),
-      values: counts
-    };
-  }
-
-  if (activeTemporalView === 'monthOfYear') {
-    const counts = Array(12).fill(0);
-    incidents.forEach(item => {
-      counts[getIncidentMonthIndex(item)]++;
-    });
-
-    return {
-      title: 'Incident Volume by Month of Year',
-      labels: Array.from({ length: 12 }, (_, i) => formatMonthLabel(`2026-${String(i + 1).padStart(2, '0')}`).replace(' 2026', '')),
-      values: counts
-    };
-  }
-
-  if (activeTemporalView === 'exactMonth') {
-    const monthKey = activeExactMonth === 'all' ? getAvailableMonthKeys()[0] : activeExactMonth;
-    const [year, month] = monthKey.split('-').map(Number);
-    const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    const counts = Array(daysInMonth).fill(0);
-
-    incidents.forEach(item => {
-      if (getIncidentMonthKey(item) === monthKey) {
-        counts[getIncidentDayOfMonth(item) - 1]++;
+  const errors = [];
+  for (const attempt of attempts) {
+    try {
+      const payload = await attempt.run();
+      const rows = Array.isArray(payload) && payload[0] && typeof payload[0] === "object"
+        ? payload
+        : extractRows(payload);
+      const parsedRecords = normalizeOfficialRows(rows);
+      if (!parsedRecords.length) {
+        throw new Error("No parseable records found in official payload.");
       }
-    });
 
-    return {
-      title: `Daily Incident Volume - ${formatMonthLabel(monthKey)}`,
-      labels: Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`),
-      values: counts
-    };
+      officialRecords = parsedRecords;
+      officialLoadState = {
+        status: "loaded",
+        error: "",
+        fetchedAt: new Date(),
+        method: attempt.label,
+        rawCount: rows.length
+      };
+      return;
+    } catch (error) {
+      errors.push(`${attempt.label}: ${error.message || error}`);
+    }
   }
 
-  const counts = Array(24).fill(0);
-  incidents.forEach(item => {
-    counts[getIncidentHour(item)]++;
-  });
-
-  return {
-    title: 'Hourly Incident Volume',
-    labels: Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`),
-    values: counts
+  officialRecords = [];
+  officialLoadState = {
+    status: "error",
+    error: errors.join(" | "),
+    fetchedAt: null,
+    method: "",
+    rawCount: 0
   };
 }
 
-// Update the searchable incident list feed container
-function updateIncidentFeedList(incidents) {
-  const feedContainer = document.getElementById('incident-feed-items');
-  feedContainer.innerHTML = '';
+async function fetchJson(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.json();
+}
 
-  const dict = translationDictionary[activeLanguage] || translationDictionary.en;
+async function fetchText(url) {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return response.text();
+}
 
-  if (incidents.length === 0) {
-    const noDataDiv = document.createElement('div');
-    noDataDiv.style.padding = '20px';
-    noDataDiv.style.textAlign = 'center';
-    noDataDiv.style.fontSize = '0.8rem';
-    noDataDiv.style.color = 'var(--text-secondary)';
-    noDataDiv.textContent = dict.noData;
+function loadJsonp(url, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `milanSafetyJsonp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    let settled = false;
+
+    function cleanup() {
+      settled = true;
+      delete window[callbackName];
+      script.remove();
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (settled) return;
+      cleanup();
+      reject(new Error("JSONP timeout"));
+    }, timeoutMs);
+
+    window[callbackName] = payload => {
+      if (settled) return;
+      window.clearTimeout(timeout);
+      cleanup();
+      resolve(payload);
+    };
+
+    script.onerror = () => {
+      if (settled) return;
+      window.clearTimeout(timeout);
+      cleanup();
+      reject(new Error("JSONP script failed"));
+    };
+
+    const parsedUrl = new URL(url, window.location.href);
+    parsedUrl.searchParams.set("callback", callbackName);
+    script.src = parsedUrl.href;
+    document.head.appendChild(script);
+  });
+}
+
+function extractRows(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (typeof payload === "string") return parseDelimitedRows(payload);
+  if (!payload || typeof payload !== "object") return [];
+
+  const candidates = [
+    payload.result && payload.result.records,
+    payload.records,
+    payload.data,
+    payload.items,
+    payload.features && payload.features.map(feature => feature.properties || feature)
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+  }
+
+  if (payload.result && typeof payload.result === "object") {
+    const resultArray = Object.values(payload.result).find(value => Array.isArray(value));
+    if (Array.isArray(resultArray)) return resultArray;
+  }
+
+  const objectValues = Object.values(payload).filter(value => value && typeof value === "object");
+  if (objectValues.length && objectValues.every(value => !Array.isArray(value))) {
+    return objectValues;
+  }
+
+  return [];
+}
+
+function parseDelimitedRows(text) {
+  const normalized = String(text || "").replace(/^\uFEFF/, "");
+  const firstLine = normalized.split(/\r?\n/, 1)[0] || "";
+  const delimiter = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ";" : ",";
+  const table = parseDelimitedTable(normalized, delimiter).filter(row => row.some(cell => String(cell).trim() !== ""));
+  if (table.length < 2) return [];
+
+  const headers = table[0].map(header => String(header || "").trim());
+  return table.slice(1).map(row => {
+    const record = {};
+    headers.forEach((header, index) => {
+      record[header] = row[index] ?? "";
+    });
+    return record;
+  });
+}
+
+function parseDelimitedTable(text, delimiter) {
+  const rows = [];
+  let currentRow = [];
+  let currentCell = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const nextChar = text[index + 1];
+
+    if (char === "\"" && inQuotes && nextChar === "\"") {
+      currentCell += "\"";
+      index += 1;
+    } else if (char === "\"") {
+      inQuotes = !inQuotes;
+    } else if (char === delimiter && !inQuotes) {
+      currentRow.push(currentCell);
+      currentCell = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && nextChar === "\n") index += 1;
+      currentRow.push(currentCell);
+      rows.push(currentRow);
+      currentRow = [];
+      currentCell = "";
+    } else {
+      currentCell += char;
+    }
+  }
+
+  currentRow.push(currentCell);
+  rows.push(currentRow);
+  return rows;
+}
+
+function normalizeOfficialRows(rows) {
+  if (!Array.isArray(rows)) return [];
+
+  const records = [];
+  rows.forEach((row, index) => {
+    if (!row || typeof row !== "object") return;
+
+    const year = parseYear(getValueByAliases(row, ["anno_rilevamento_reato", "anno", "year"]));
+    if (!year) return;
+
+    const type = cleanCrimeType(getValueByAliases(row, [
+      "Reati_denunciati_tipologia",
+      "reati_denunciati_tipologia",
+      "tipologia",
+      "tipo",
+      "reato",
+      "serie_storica"
+    ]));
+    const count = parseOfficialNumber(getValueByAliases(row, [
+      "reati_denunciati",
+      "valore",
+      "totale",
+      "numero",
+      "count",
+      "value"
+    ]));
+
+    if (type && Number.isFinite(count)) {
+      records.push(makeOfficialRecord(year, type, count, row, index));
+      return;
+    }
+
+    Object.entries(row).forEach(([field, value]) => {
+      if (isWideFormatIgnoredField(field)) return;
+      const parsedValue = parseOfficialNumber(value);
+      if (!Number.isFinite(parsedValue)) return;
+      records.push(makeOfficialRecord(year, cleanCrimeType(field), parsedValue, row, index));
+    });
+  });
+
+  return dedupeOfficialRecords(records).sort((a, b) => (
+    a.year - b.year
+    || a.type.localeCompare(b.type, "it-IT")
+    || a.count - b.count
+  ));
+}
+
+function getValueByAliases(row, aliases) {
+  const entries = Object.entries(row);
+  const normalizedAliases = aliases.map(normalizeFieldName);
+
+  for (const [key, value] of entries) {
+    if (normalizedAliases.includes(normalizeFieldName(key))) return value;
+  }
+
+  return undefined;
+}
+
+function normalizeFieldName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function parseYear(value) {
+  const match = String(value ?? "").match(/\b(19|20)\d{2}\b/);
+  if (!match) return null;
+  const year = Number(match[0]);
+  return year >= 1900 && year <= 2100 ? year : null;
+}
+
+function parseOfficialNumber(value) {
+  if (value === null || value === undefined) return NaN;
+  if (typeof value === "number") return Number.isFinite(value) ? value : NaN;
+
+  const raw = String(value).trim();
+  if (!raw || raw === "-" || raw.toLowerCase() === "na") return NaN;
+
+  let normalized = raw.replace(/\s/g, "").replace(/[^\d,.-]/g, "");
+  if (!normalized || normalized === "-") return NaN;
+
+  const dotCount = (normalized.match(/\./g) || []).length;
+  if (normalized.includes(",") && normalized.includes(".")) {
+    normalized = normalized.replace(/\./g, "").replace(",", ".");
+  } else if (normalized.includes(",")) {
+    normalized = normalized.replace(",", ".");
+  } else if (dotCount > 1 || /\.\d{3}($|\.)/.test(normalized)) {
+    normalized = normalized.replace(/\./g, "");
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.round(parsed) : NaN;
+}
+
+function cleanCrimeType(value) {
+  return String(value ?? "")
+    .replace(/_/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isWideFormatIgnoredField(field) {
+  const normalized = normalizeFieldName(field);
+  return [
+    "id",
+    "id",
+    "anno",
+    "year",
+    "annorilevamentoreato",
+    "reatidenunciatitipologia",
+    "tipologia",
+    "tipo",
+    "reato",
+    "seriestorica",
+    "codice",
+    "geo"
+  ].includes(normalized) || normalized.startsWith("id");
+}
+
+function makeOfficialRecord(year, type, count, raw, index) {
+  const cleanType = cleanCrimeType(type);
+  return {
+    id: `${year}-${slugify(cleanType)}-${index}`,
+    year,
+    type: cleanType,
+    count: Math.max(0, Math.round(count)),
+    isTotal: isTotalType(cleanType),
+    sourceIds: ["comune-milano-ds564", "comune-milano-api", "comune-milano-csv"],
+    raw
+  };
+}
+
+function dedupeOfficialRecords(records) {
+  const seen = new Set();
+  return records.filter(record => {
+    const key = `${record.year}|${record.type}|${record.count}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function slugify(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 50) || "record";
+}
+
+function isTotalType(type) {
+  const normalized = normalizeFieldName(type);
+  return normalized.includes("totale");
+}
+
+function applyFiltersAndRender() {
+  const filteredData = getFilteredRecords();
+  renderMapLayer(filteredData);
+  updateChartsData(filteredData);
+  updateOfficialRecordList(filteredData);
+  updateDataSourceSummary(filteredData);
+}
+
+function getFilteredRecords() {
+  const query = feedSearchQuery.trim().toLowerCase();
+
+  return officialRecords.filter(record => {
+    const categoryMatch = activeFilters.category === "all" || record.type === activeFilters.category;
+    const yearMatch = activeFilters.year === "all" || String(record.year) === String(activeFilters.year);
+    const textMatch = !query || [
+      record.type,
+      record.year,
+      record.count,
+      officialCrimeDataset.publisher,
+      officialCrimeDataset.id
+    ].join(" ").toLowerCase().includes(query);
+
+    return categoryMatch && yearMatch && textMatch;
+  });
+}
+
+function getAvailableYears() {
+  return [...new Set(officialRecords.map(record => record.year))]
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a);
+}
+
+function getCrimeTypeTotals(records) {
+  const totals = new Map();
+  records.filter(record => !record.isTotal).forEach(record => {
+    totals.set(record.type, (totals.get(record.type) || 0) + record.count);
+  });
+
+  return [...totals.entries()].map(([type, count]) => ({ type, count }));
+}
+
+function getTopCrimeTypes(records, limit = 8) {
+  return getCrimeTypeTotals(records)
+    .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type, getLocale()))
+    .slice(0, limit);
+}
+
+function getAnnualTotals(records) {
+  const byYear = new Map();
+  records.forEach(record => {
+    if (!byYear.has(record.year)) {
+      byYear.set(record.year, { year: record.year, totalCandidates: [], categorySum: 0 });
+    }
+
+    const bucket = byYear.get(record.year);
+    if (record.isTotal) {
+      bucket.totalCandidates.push(record.count);
+    } else {
+      bucket.categorySum += record.count;
+    }
+  });
+
+  return [...byYear.values()]
+    .map(bucket => ({
+      year: bucket.year,
+      count: bucket.totalCandidates.length
+        ? Math.max(...bucket.totalCandidates)
+        : bucket.categorySum
+    }))
+    .sort((a, b) => a.year - b.year);
+}
+
+function getAggregateCount(records) {
+  return getAnnualTotals(records).reduce((sum, row) => sum + row.count, 0);
+}
+
+function renderMapLayer(records) {
+  if (officialLoadState.status === "error") {
+    showMapFallback(t("loadFailed", "Official data could not be loaded"), officialLoadState.error);
+    return;
+  }
+
+  if (!mapReady || !map) {
+    renderStaticMapFallback(records);
+    return;
+  }
+
+  [heatmapLayerGroup, bubbleLayerGroup, choroplethLayerGroup, markerLayerGroup].forEach(layer => {
+    if (layer) layer.clearLayers();
+  });
+
+  [heatmapLayerGroup, bubbleLayerGroup, choroplethLayerGroup, markerLayerGroup].forEach(layer => {
+    if (layer && map.hasLayer(layer)) map.removeLayer(layer);
+  });
+
+  const activeLayer = {
+    heatmap: heatmapLayerGroup,
+    bubbleMap: bubbleLayerGroup,
+    choroplethMap: choroplethLayerGroup,
+    markerPins: markerLayerGroup
+  }[activeViewMode] || heatmapLayerGroup;
+
+  const total = getAggregateCount(records);
+  const hasRecords = records.length > 0;
+  const radius = hasRecords ? Math.max(900, Math.min(6200, Math.sqrt(Math.max(total, 1)) * 9)) : 900;
+  const center = [milanOfficialArea.lat, milanOfficialArea.lng];
+
+  const colorByMode = {
+    heatmap: "#06b6d4",
+    bubbleMap: "#10b981",
+    choroplethMap: "#f59e0b",
+    markerPins: "#ef4444"
+  };
+  const color = colorByMode[activeViewMode] || "#06b6d4";
+
+  const cityCircle = L.circle(center, {
+    color,
+    fillColor: color,
+    fillOpacity: activeViewMode === "markerPins" ? 0.12 : 0.26,
+    radius,
+    weight: 2
+  });
+  cityCircle.bindPopup(getCityPopupHtml(records));
+  activeLayer.addLayer(cityCircle);
+
+  const cityMarker = L.circleMarker(center, {
+    radius: activeViewMode === "markerPins" ? 8 : 5,
+    color: "#ffffff",
+    fillColor: color,
+    fillOpacity: 0.85,
+    weight: 1.5
+  });
+  cityMarker.bindPopup(getCityPopupHtml(records));
+  activeLayer.addLayer(cityMarker);
+
+  activeLayer.addTo(map);
+}
+
+function getCityPopupHtml(records) {
+  const count = getAggregateCount(records);
+  const yearLabel = activeFilters.year === "all" ? t("allMonths", "All Years") : activeFilters.year;
+  const categoryLabel = activeFilters.category === "all" ? t("allCategories", "All Crime Types") : activeFilters.category;
+  const sourceUrl = getSafeExternalUrl(officialCrimeDataset.landingPage);
+
+  return `
+    <div style="font-family: var(--font-main); min-width: 210px;">
+      <h4 style="color: #fff; margin-bottom: 6px;">${escapeHtml(getOfficialAreaName())}</h4>
+      <p style="margin: 0 0 8px; font-size: 0.78rem; line-height: 1.45;">
+        ${escapeHtml(t("totalIncidents", "Reported offences"))}: <strong>${escapeHtml(formatNumber(count))}</strong>
+      </p>
+      <div style="display: grid; gap: 4px; font-size: 0.72rem; color: #9ca3af;">
+        <span>${escapeHtml(t("yearLabel", "Year"))}: ${escapeHtml(yearLabel)}</span>
+        <span>${escapeHtml(t("categoryLabel", "Crime type"))}: ${escapeHtml(categoryLabel)}</span>
+        <span>${escapeHtml(t("scopeLabel", "Scope"))}: ${escapeHtml(officialCrimeDataset.granularity)}</span>
+        <a href="${sourceUrl}" target="_blank" rel="noopener noreferrer" style="color:#06b6d4;">${escapeHtml(t("sourceOpen", "Open source"))}</a>
+      </div>
+    </div>
+  `;
+}
+
+function getOfficialAreaName() {
+  if (activeLanguage === "zh") return milanOfficialArea.nameZh;
+  if (activeLanguage === "it") return milanOfficialArea.nameIt;
+  return milanOfficialArea.nameEn;
+}
+
+function updateChartsData(records) {
+  if (!chartsReady || !categoryChart || !hourlyChart || !districtChart) {
+    renderChartFallbacks(records);
+    return;
+  }
+
+  const topTypes = getTopCrimeTypes(records, 8);
+  categoryChart.data.labels = topTypes.map(row => row.type);
+  categoryChart.data.datasets[0].data = topTypes.map(row => row.count);
+  categoryChart.update();
+
+  updateTemporalChart(records);
+  updateSourceCoverageChart();
+}
+
+function updateTemporalChart(records) {
+  const unavailableViews = {
+    hour: "hour",
+    dayOfMonth: "day of month",
+    monthOfYear: "month of year"
+  };
+
+  if (unavailableViews[activeTemporalView]) {
+    setText("#chart-title-time", `${t("unavailableChartTitle", "Requested Time Dimension Not In Source")}: ${unavailableViews[activeTemporalView]}`);
+    hourlyChart.data.labels = [];
+    hourlyChart.data.datasets[0].label = t("unavailableLabel", "Unavailable in source");
+    hourlyChart.data.datasets[0].data = [];
+    hourlyChart.update();
+    return;
+  }
+
+  const selectedYear = activeFilters.year === "all" ? null : Number(activeFilters.year);
+  if (selectedYear) {
+    const yearRecords = records.filter(record => record.year === selectedYear);
+    const yearRows = getTopCrimeTypes(yearRecords, 10);
+    setText("#chart-title-time", `${t("exactYearTitle", "Selected Year Breakdown")} ${selectedYear}`);
+    hourlyChart.data.labels = yearRows.map(row => row.type);
+    hourlyChart.data.datasets[0].label = t("totalIncidents", "Reported offences");
+    hourlyChart.data.datasets[0].data = yearRows.map(row => row.count);
+    hourlyChart.update();
+    return;
+  }
+
+  const trendBase = activeFilters.category === "all"
+    ? officialRecords.filter(record => matchesSearch(record))
+    : officialRecords.filter(record => record.type === activeFilters.category && matchesSearch(record));
+  const annualRows = getAnnualTotals(trendBase);
+  setText("#chart-title-time", t("annualTrendTitle", "Annual Trend"));
+  hourlyChart.data.labels = annualRows.map(row => String(row.year));
+  hourlyChart.data.datasets[0].label = t("totalIncidents", "Reported offences");
+  hourlyChart.data.datasets[0].data = annualRows.map(row => row.count);
+  hourlyChart.update();
+}
+
+function matchesSearch(record) {
+  const query = feedSearchQuery.trim().toLowerCase();
+  if (!query) return true;
+  return [record.type, record.year, record.count].join(" ").toLowerCase().includes(query);
+}
+
+function updateSourceCoverageChart() {
+  setText("#chart-title-district", t("sourceScopeTitle", "Source Coverage and Fields"));
+  districtChart.data.labels = [
+    t("fieldLabel", "Official fields"),
+    t("unavailableLabel", "Unavailable in source"),
+    t("sourceLinksLabel", "source links")
+  ];
+  districtChart.data.datasets[0].data = [
+    officialCrimeDataset.fields.length,
+    officialCrimeDataset.unavailableDimensions.length,
+    officialDataSources.length
+  ];
+  districtChart.data.datasets[0].backgroundColor = [
+    "rgba(16, 185, 129, 0.72)",
+    "rgba(245, 158, 11, 0.72)",
+    "rgba(6, 182, 212, 0.72)"
+  ];
+  districtChart.update();
+}
+
+function updateOfficialRecordList(records) {
+  const feedContainer = document.getElementById("incident-feed-items");
+  if (!feedContainer) return;
+
+  feedContainer.innerHTML = "";
+
+  if (officialLoadState.status === "loading") {
+    const loading = document.createElement("div");
+    loading.className = "feed-empty-state";
+    loading.textContent = t("loadingData", "Loading official data...");
+    feedContainer.appendChild(loading);
+    return;
+  }
+
+  if (officialLoadState.status === "error") {
+    feedContainer.appendChild(buildSourceErrorElement());
+    return;
+  }
+
+  if (!records.length) {
+    const noDataDiv = document.createElement("div");
+    noDataDiv.className = "feed-empty-state";
+    noDataDiv.textContent = t("noData", "No official records match the active filters.");
     feedContainer.appendChild(noDataDiv);
     return;
   }
 
-  // Sort by time (newest first)
-  const sortedIncidents = [...incidents].sort((a, b) => b.id - a.id);
+  const sortedRecords = [...records].sort((a, b) => (
+    b.year - a.year
+    || b.count - a.count
+    || a.type.localeCompare(b.type, getLocale())
+  ));
 
-  sortedIncidents.forEach(item => {
-    const card = document.createElement('div');
-    card.className = 'feed-card';
-    
-    const catText = dict[item.category] || item.category;
-    const descText = item.details[activeLanguage] || item.details['en'];
-    const sourceLinks = getIncidentSources(item).slice(0, 2).map(source => (
+  sortedRecords.slice(0, 150).forEach(record => {
+    const card = document.createElement("div");
+    card.className = "feed-card";
+
+    const sourceLinks = getRecordSources(record).slice(0, 3).map(source => (
       `<a href="${getSafeExternalUrl(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.name)}</a>`
-    )).join('');
+    )).join("");
 
     card.innerHTML = `
       <div class="feed-card-header">
-        <span class="feed-card-title">${escapeHtml(catText)}</span>
-        <span class="feed-card-time">${formatIncidentHour(item)}</span>
+        <span class="feed-card-title">${escapeHtml(record.type)}</span>
+        <span class="feed-card-time">${escapeHtml(String(record.year))}</span>
       </div>
-      <p class="feed-card-desc">${escapeHtml(descText)}</p>
+      <p class="feed-card-desc">
+        ${escapeHtml(formatNumber(record.count))} ${escapeHtml(t("totalIncidents", "reported offences"))}
+        / ${escapeHtml(getOfficialAreaName())}
+      </p>
       <div class="feed-card-meta">
-        <span>${escapeHtml(formatIncidentDate(item))}</span>
-        <span>${escapeHtml(t('sourceSynthetic', 'Synthetic incident row derived from official aggregate indicators'))}</span>
+        <span>${escapeHtml(t("sourceRecord", "Official aggregate record"))}</span>
+        <span>${escapeHtml(t("countLabel", "Count"))}: ${escapeHtml(formatNumber(record.count))}</span>
+        <span>${escapeHtml(officialCrimeDataset.granularity)}</span>
       </div>
       <div class="feed-card-sources">${sourceLinks}</div>
     `;
 
-    card.querySelectorAll('a').forEach(link => {
-      link.addEventListener('click', event => event.stopPropagation());
+    card.querySelectorAll("a").forEach(link => {
+      link.addEventListener("click", event => event.stopPropagation());
     });
 
-    // Interactive card click: pan map, zoom, and trigger popup
-    card.addEventListener('click', () => {
-      if (!mapReady || !map) return;
-      map.setView([item.lat, item.lng], 15);
-      
-      // If marker mode is active, trigger the popup
-      if (activeViewMode === 'markerPins' && item.markerRef) {
-        item.markerRef.openPopup();
-      } else {
-        // Fallback popup if in heatmap or bubble view
-        L.popup()
-          .setLatLng([item.lat, item.lng])
-          .setContent(`
-            <div style="min-width: 160px; font-family: var(--font-main);">
-              <h4 style="color:#fff; margin-bottom:4px;">${escapeHtml(catText)}</h4>
-              <p style="margin: 0; font-size: 0.78rem;">${escapeHtml(descText)}</p>
-            </div>
-          `)
-          .openOn(map);
-      }
+    card.addEventListener("click", () => {
+      if (!mapReady || !map || typeof L === "undefined") return;
+      map.setView([milanOfficialArea.lat, milanOfficialArea.lng], 12);
+      if (activeCityPopup) activeCityPopup.remove();
+      activeCityPopup = L.popup()
+        .setLatLng([milanOfficialArea.lat, milanOfficialArea.lng])
+        .setContent(`
+          <div style="font-family: var(--font-main); min-width: 180px;">
+            <h4 style="color:#fff; margin-bottom:6px;">${escapeHtml(record.type)}</h4>
+            <p style="margin:0; font-size:0.78rem;">${escapeHtml(record.year)}: ${escapeHtml(formatNumber(record.count))}</p>
+          </div>
+        `)
+        .openOn(map);
     });
 
     feedContainer.appendChild(card);
   });
+
+  if (sortedRecords.length > 150) {
+    const footer = document.createElement("div");
+    footer.className = "feed-empty-state";
+    footer.textContent = `${formatNumber(sortedRecords.length - 150)} more official records match; narrow the filter or search.`;
+    feedContainer.appendChild(footer);
+  }
 }
 
-// Populate the bottom news ticker marquee alerts
+function buildSourceErrorElement() {
+  const wrapper = document.createElement("div");
+  wrapper.className = "feed-empty-state";
+
+  const message = document.createElement("p");
+  message.textContent = `${t("loadFailed", "Official data could not be loaded")}.`;
+  wrapper.appendChild(message);
+
+  const link = document.createElement("a");
+  link.href = getSafeExternalUrl(officialCrimeDataset.landingPage);
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.textContent = t("retrySource", "Open the official source URL");
+  wrapper.appendChild(link);
+
+  return wrapper;
+}
+
 function populateNewsTicker() {
-  const tickerContent = document.getElementById('news-ticker-scroll-content');
-  tickerContent.innerHTML = '';
-  
-  // Combine news items with elegant separators
-  const combinedAlerts = recentNewsAlerts.map(alert => alert[activeLanguage] || alert['en']).join('     •     ');
+  const tickerContent = document.getElementById("news-ticker-scroll-content");
+  if (!tickerContent) return;
+
+  const combinedAlerts = recentNewsAlerts
+    .map(alert => alert[activeLanguage] || alert.en)
+    .join("  /  ");
   tickerContent.textContent = combinedAlerts;
 }
 
 function populateSourceLinks() {
-  const sourceList = document.getElementById('source-link-list');
-  if (!sourceList || typeof officialDataSources === 'undefined') return;
+  const sourceList = document.getElementById("source-link-list");
+  if (!sourceList || typeof officialDataSources === "undefined") return;
 
-  sourceList.innerHTML = '';
+  sourceList.innerHTML = "";
   officialDataSources.forEach(source => {
-    const link = document.createElement('a');
-    link.className = 'citation-badge source-link';
+    const link = document.createElement("a");
+    link.className = "citation-badge source-link";
     link.href = getSafeExternalUrl(source.url);
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
     link.title = `${source.usedFor} - ${getSafeExternalUrl(source.url)}`;
-    link.textContent = source.name.replace(' - Milano', '');
+    link.textContent = source.name;
     sourceList.appendChild(link);
   });
 }
 
-function populateExactMonthOptions() {
-  const select = document.getElementById('filter-exact-month');
-  if (!select) return;
-
-  const previousValue = activeExactMonth;
-  const months = getAvailableMonthKeys();
-  select.innerHTML = '';
-
-  months.forEach(monthKey => {
-    const option = document.createElement('option');
-    option.value = monthKey;
-    option.textContent = formatMonthLabel(monthKey);
-    select.appendChild(option);
-  });
-
-  activeExactMonth = months.includes(previousValue) ? previousValue : (months[months.length - 1] || 'all');
-  select.value = activeExactMonth;
-}
-
 function updateTemporalControlsUI() {
-  document.querySelectorAll('[data-time-view]').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.timeView === activeTemporalView);
+  document.querySelectorAll("[data-time-view]").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.timeView === activeTemporalView);
+    btn.classList.toggle("unavailable", ["hour", "dayOfMonth", "monthOfYear"].includes(btn.dataset.timeView));
   });
 
-  const exactMonthGroup = document.querySelector('.exact-month-group');
+  const exactMonthGroup = document.querySelector(".exact-month-group");
   if (exactMonthGroup) {
-    exactMonthGroup.classList.toggle('is-active', activeTemporalView === 'exactMonth');
+    exactMonthGroup.classList.toggle("is-active", activeTemporalView === "exactMonth");
   }
 }
 
-function updateDataSourceSummary(filteredData) {
-  const summary = document.getElementById('data-source-summary');
+function updateDataSourceSummary(records) {
+  const summary = document.getElementById("data-source-summary");
   if (!summary) return;
 
-  const sourceCount = typeof officialDataSources === 'undefined' ? 0 : officialDataSources.length;
-  const monthLabel = activeTemporalView === 'exactMonth' && activeExactMonth !== 'all'
-    ? formatMonthLabel(activeExactMonth)
-    : t('allMonths', 'All Months');
+  if (officialLoadState.status === "loading") {
+    summary.textContent = t("loadingData", "Loading official data...");
+    return;
+  }
+
+  if (officialLoadState.status === "error") {
+    summary.innerHTML = `
+      <div><strong>${escapeHtml(t("loadFailed", "Official data could not be loaded"))}</strong></div>
+      <div>${escapeHtml(officialLoadState.error)}</div>
+      <div><a href="${getSafeExternalUrl(officialCrimeDataset.landingPage)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t("retrySource", "Open the official source URL"))}</a></div>
+    `;
+    return;
+  }
+
+  const yearLabel = activeFilters.year === "all" ? t("allMonths", "All Years") : activeFilters.year;
+  const categoryLabel = activeFilters.category === "all" ? t("allCategories", "All Crime Types") : activeFilters.category;
+  const unavailable = officialCrimeDataset.unavailableDimensions.join(", ");
+  const fetchedAt = officialLoadState.fetchedAt
+    ? new Intl.DateTimeFormat(getLocale(), { dateStyle: "medium", timeStyle: "short" }).format(officialLoadState.fetchedAt)
+    : officialCrimeDataset.lastUpdated;
 
   summary.innerHTML = `
-    <div><strong>${filteredData.length}</strong> ${t('filteredRecordsLabel', 'filtered')} / ${safetyIncidents.length} ${t('dataRecordsLabel', 'records')}</div>
-    <div><strong>${sourceCount}</strong> ${t('sourceLinksLabel', 'source links')} · ${monthLabel}</div>
+    <div><strong>${escapeHtml(formatNumber(records.length))}</strong> ${escapeHtml(t("filteredRecordsLabel", "filtered"))} / ${escapeHtml(formatNumber(officialRecords.length))} ${escapeHtml(t("dataRecordsLabel", "records"))}</div>
+    <div><strong>${escapeHtml(formatNumber(getAggregateCount(records)))}</strong> ${escapeHtml(t("totalIncidents", "Reported offences"))} / ${escapeHtml(yearLabel)}</div>
+    <div>${escapeHtml(t("categoryLabel", "Crime type"))}: <strong>${escapeHtml(categoryLabel)}</strong></div>
+    <div>${escapeHtml(t("scopeLabel", "Scope"))}: ${escapeHtml(officialCrimeDataset.granularity)}</div>
+    <div>${escapeHtml(t("fieldLabel", "Official fields"))}: ${officialCrimeDataset.fields.map(field => escapeHtml(field.name)).join(", ")}</div>
+    <div>${escapeHtml(t("unavailableLabel", "Unavailable in source"))}: ${escapeHtml(unavailable)}</div>
+    <div>${escapeHtml(t("sourceMethod", "Source method"))}: ${escapeHtml(officialLoadState.method || "Official source")}</div>
+    <div>${escapeHtml(t("updatedLabel", "Updated"))}: ${escapeHtml(fetchedAt)}</div>
+    <div><a href="${getSafeExternalUrl(officialCrimeDataset.apiUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t("urlLabel", "URL"))}: CKAN API</a></div>
+    <div><a href="${getSafeExternalUrl(officialCrimeDataset.landingPage)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t("sourceOpen", "Open source"))}: DS564</a></div>
+    <div>${escapeHtml(t("experimentalNotice", "Experimental visualization only."))}</div>
   `;
 }
 
 function showMapFallback(title, message) {
-  const mapElement = document.getElementById('map');
+  const mapElement = document.getElementById("map");
   if (!mapElement) return;
 
-  mapElement.classList.add('map-fallback');
+  mapElement.classList.add("map-fallback");
   mapElement.innerHTML = `
     <div class="map-fallback-panel">
       <div class="map-fallback-kicker">Milan Safety Map</div>
       <h2>${escapeHtml(title)}</h2>
       <p>${escapeHtml(message)}</p>
+      <a href="${getSafeExternalUrl(officialCrimeDataset.landingPage)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t("retrySource", "Open the official source URL"))}</a>
     </div>
   `;
 }
 
-function renderStaticMapFallback(incidents) {
-  const mapElement = document.getElementById('map');
+function renderStaticMapFallback(records) {
+  const mapElement = document.getElementById("map");
   if (!mapElement) return;
 
-  const districtCounts = {};
-  milanDistricts.forEach(district => {
-    districtCounts[district.id] = { ...district, count: 0 };
-  });
-
-  incidents.forEach(incident => {
-    if (districtCounts[incident.district]) {
-      districtCounts[incident.district].count++;
-    }
-  });
-
-  const rows = Object.values(districtCounts)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6);
-
-  mapElement.classList.add('map-fallback');
+  const topTypes = getTopCrimeTypes(records, 6);
+  mapElement.classList.add("map-fallback");
   mapElement.innerHTML = `
     <div class="map-fallback-panel map-fallback-wide">
-      <div class="map-fallback-kicker">Local fallback view</div>
-      <h2>Interactive map assets unavailable</h2>
-      <p>The data layer is still loaded. Review the highest-volume districts below, or reload when Leaflet assets are available.</p>
+      <div class="map-fallback-kicker">${escapeHtml(t("scopeLabel", "Scope"))}</div>
+      <h2>${escapeHtml(getOfficialAreaName())}</h2>
+      <p>${escapeHtml(officialCrimeDataset.granularity)}</p>
       <div class="fallback-district-list">
-        ${rows.map(row => `
+        ${topTypes.map(row => `
           <div class="fallback-district-row">
-            <span>${escapeHtml(getDistrictName(row))}</span>
-            <strong>${row.count}</strong>
+            <span>${escapeHtml(row.type)}</span>
+            <strong>${escapeHtml(formatNumber(row.count))}</strong>
           </div>
-        `).join('')}
+        `).join("")}
       </div>
     </div>
   `;
 }
 
-function renderChartFallbacks(incidents) {
-  const dict = translationDictionary[activeLanguage] || translationDictionary.en;
-  const categoryCounts = { theft: 0, assault: 0, drugRelated: 0, vandalism: 0, harassment: 0 };
-  incidents.forEach(item => {
-    if (categoryCounts[item.category] !== undefined) {
-      categoryCounts[item.category]++;
-    }
-  });
+function renderChartFallbacks(records) {
+  const topTypes = getTopCrimeTypes(records, 6).map(row => [row.type, row.count, "#06b6d4"]);
+  renderMiniBars(document.getElementById("categoryChart")?.parentElement, topTypes);
 
-  renderMiniBars(document.getElementById('categoryChart')?.parentElement, [
-    [dict.theft, categoryCounts.theft, '#a855f7'],
-    [dict.assault, categoryCounts.assault, '#ef4444'],
-    [dict.drugRelated, categoryCounts.drugRelated, '#f59e0b'],
-    [dict.vandalism, categoryCounts.vandalism, '#06b6d4'],
-    [dict.harassment, categoryCounts.harassment, '#3b82f6']
+  const annualRows = getAnnualTotals(records).map(row => [String(row.year), row.count, "#10b981"]);
+  renderMiniBars(document.getElementById("hourlyChart")?.parentElement, annualRows);
+
+  renderMiniBars(document.getElementById("districtChart")?.parentElement, [
+    [t("fieldLabel", "Official fields"), officialCrimeDataset.fields.length, "#10b981"],
+    [t("unavailableLabel", "Unavailable in source"), officialCrimeDataset.unavailableDimensions.length, "#f59e0b"],
+    [t("sourceLinksLabel", "source links"), officialDataSources.length, "#06b6d4"]
   ]);
-
-  const temporalSeries = getTemporalSeries(incidents);
-  const temporalRows = temporalSeries.labels
-    .map((label, index) => [label, temporalSeries.values[index], '#06b6d4'])
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8);
-
-  const temporalTitle = document.getElementById('chart-title-time');
-  if (temporalTitle) temporalTitle.textContent = temporalSeries.title;
-  renderMiniBars(document.getElementById('hourlyChart')?.parentElement, temporalRows);
-
-  const districtRows = [...milanDistricts]
-    .sort((a, b) => b.baseRisk - a.baseRisk)
-    .slice(0, 8)
-    .map(district => [
-      getDistrictName(district),
-      district.baseRisk,
-      district.baseRisk > 7.0 ? '#ef4444' : district.baseRisk > 4.5 ? '#f59e0b' : '#10b981'
-    ]);
-
-  renderMiniBars(document.getElementById('districtChart')?.parentElement, districtRows);
 }
 
 function renderMiniBars(target, rows) {
   if (!target) return;
 
-  const maxValue = Math.max(...rows.map(row => Number(row[1]) || 0), 1);
-  target.innerHTML = '';
-  target.classList.add('fallback-chart-wrapper');
+  const safeRows = rows.length ? rows : [[t("noData", "No data"), 0, "#6b7280"]];
+  const maxValue = Math.max(...safeRows.map(row => Number(row[1]) || 0), 1);
+  target.innerHTML = "";
+  target.classList.add("fallback-chart-wrapper");
 
-  rows.forEach(([label, value, color]) => {
-    const row = document.createElement('div');
-    row.className = 'mini-bar-row';
+  safeRows.forEach(([label, value, color]) => {
+    const row = document.createElement("div");
+    row.className = "mini-bar-row";
 
-    const labelEl = document.createElement('span');
-    labelEl.className = 'mini-bar-label';
+    const labelEl = document.createElement("span");
+    labelEl.className = "mini-bar-label";
     labelEl.textContent = label;
 
-    const track = document.createElement('div');
-    track.className = 'mini-bar-track';
+    const track = document.createElement("div");
+    track.className = "mini-bar-track";
 
-    const fill = document.createElement('div');
-    fill.className = 'mini-bar-fill';
-    fill.style.width = `${Math.max((Number(value) || 0) / maxValue * 100, 4)}%`;
+    const fill = document.createElement("div");
+    fill.className = "mini-bar-fill";
+    fill.style.width = `${Math.max((Number(value) || 0) / maxValue * 100, value > 0 ? 4 : 0)}%`;
     fill.style.backgroundColor = color;
     track.appendChild(fill);
 
-    const valueEl = document.createElement('strong');
-    valueEl.className = 'mini-bar-value';
-    valueEl.textContent = value;
+    const valueEl = document.createElement("strong");
+    valueEl.className = "mini-bar-value";
+    valueEl.textContent = formatNumber(value);
 
     row.appendChild(labelEl);
     row.appendChild(track);
@@ -986,114 +1274,110 @@ function renderMiniBars(target, rows) {
   });
 }
 
-function getDistrictName(district) {
-  if (activeLanguage === 'zh') return district.nameZh;
-  if (activeLanguage === 'it') return district.nameIt;
-  return district.nameEn;
-}
-
 function getSourceById(sourceId) {
-  if (typeof officialDataSources === 'undefined') return null;
+  if (typeof officialDataSources === "undefined") return null;
   return officialDataSources.find(source => source.id === sourceId) || null;
 }
 
-function getIncidentSources(incident) {
-  const ids = incident.sourceIds || [];
+function getRecordSources(record) {
+  const ids = record.sourceIds || [];
   return ids.map(getSourceById).filter(Boolean);
 }
 
-// Helper to update the text labels near the hour slider dynamically
 function updateHourSliderReadout() {
-  const minReadout = document.getElementById('slider-min-readout');
-  const maxReadout = document.getElementById('slider-max-readout');
-  const hourVal = activeFilters.hour;
-  
-  if (hourVal === -1) {
-    const dict = translationDictionary[activeLanguage] || translationDictionary.en;
-    minReadout.textContent = dict.allTimes || 'All Hours';
-    maxReadout.textContent = '';
-  } else {
-    minReadout.textContent = `${String(hourVal).padStart(2, '0')}:00`;
-    maxReadout.textContent = `${String((hourVal + 1) % 24).padStart(2, '0')}:00`;
-  }
+  const minReadout = document.getElementById("slider-min-readout");
+  const maxReadout = document.getElementById("slider-max-readout");
+  if (minReadout) minReadout.textContent = t("allTimes", "No hour field");
+  if (maxReadout) maxReadout.textContent = "";
 }
 
-// Connect listeners to buttons, slider, and text filters
 function setupEventListeners() {
-  // Language selectors
-  document.querySelectorAll('.lang-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      activeLanguage = e.target.dataset.lang;
-      localStorage.setItem('milan_safety_lang', activeLanguage);
+  document.querySelectorAll(".lang-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeLanguage = btn.dataset.lang;
+      localStorage.setItem("milan_safety_lang", activeLanguage);
       updateLanguageUI();
       populateNewsTicker();
       applyFiltersAndRender();
     });
   });
 
-  // Map view switcher buttons
   const mapBtns = {
-    'btn-heatmap': 'heatmap',
-    'btn-bubble': 'bubbleMap',
-    'btn-choropleth': 'choroplethMap',
-    'btn-marker': 'markerPins'
+    "btn-heatmap": "heatmap",
+    "btn-bubble": "bubbleMap",
+    "btn-choropleth": "choroplethMap",
+    "btn-marker": "markerPins"
   };
 
   Object.entries(mapBtns).forEach(([btnId, mode]) => {
-    document.getElementById(btnId).addEventListener('click', (e) => {
+    const button = document.getElementById(btnId);
+    if (!button) return;
+
+    button.addEventListener("click", () => {
       Object.keys(mapBtns).forEach(id => {
-        document.getElementById(id).classList.remove('active');
+        const otherButton = document.getElementById(id);
+        if (otherButton) otherButton.classList.remove("active");
       });
-      document.getElementById(btnId).classList.add('active');
+      button.classList.add("active");
       activeViewMode = mode;
       applyFiltersAndRender();
     });
   });
 
-  document.querySelectorAll('[data-time-view]').forEach(btn => {
-    btn.addEventListener('click', () => {
+  document.querySelectorAll("[data-time-view]").forEach(btn => {
+    btn.addEventListener("click", () => {
       activeTemporalView = btn.dataset.timeView;
-      if (activeTemporalView === 'exactMonth' && activeExactMonth === 'all') {
-        const availableMonths = getAvailableMonthKeys();
-        activeExactMonth = availableMonths[availableMonths.length - 1] || 'all';
-        const exactMonthSelect = document.getElementById('filter-exact-month');
-        if (exactMonthSelect) exactMonthSelect.value = activeExactMonth;
-      }
       updateTemporalControlsUI();
       applyFiltersAndRender();
     });
   });
 
-  document.getElementById('filter-exact-month').addEventListener('change', (e) => {
-    activeExactMonth = e.target.value;
-    activeTemporalView = 'exactMonth';
-    updateTemporalControlsUI();
-    applyFiltersAndRender();
-  });
+  const yearSelect = document.getElementById("filter-exact-month");
+  if (yearSelect) {
+    yearSelect.addEventListener("change", event => {
+      activeFilters.year = event.target.value;
+      activeTemporalView = "exactMonth";
+      updateTemporalControlsUI();
+      applyFiltersAndRender();
+    });
+  }
 
-  // Filter dropdown listeners
-  document.getElementById('filter-category').addEventListener('change', (e) => {
-    activeFilters.category = e.target.value;
-    applyFiltersAndRender();
-  });
+  const categorySelect = document.getElementById("filter-category");
+  if (categorySelect) {
+    categorySelect.addEventListener("change", event => {
+      activeFilters.category = event.target.value;
+      applyFiltersAndRender();
+    });
+  }
 
-  document.getElementById('filter-severity').addEventListener('change', (e) => {
-    activeFilters.severity = e.target.value;
-    applyFiltersAndRender();
-  });
+  const hourSlider = document.getElementById("filter-hour");
+  if (hourSlider) {
+    hourSlider.addEventListener("input", () => {
+      hourSlider.value = "-1";
+      updateHourSliderReadout();
+    });
+  }
 
-  // Hour slider change listener
-  const hourSlider = document.getElementById('filter-hour');
-  hourSlider.addEventListener('input', (e) => {
-    activeFilters.hour = parseInt(e.target.value);
-    updateHourSliderReadout();
-    applyFiltersAndRender();
-  });
+  const searchInput = document.getElementById("feed-search");
+  if (searchInput) {
+    searchInput.addEventListener("input", event => {
+      feedSearchQuery = event.target.value;
+      applyFiltersAndRender();
+    });
+  }
+}
 
-  // Text search listener
-  const searchInput = document.getElementById('feed-search');
-  searchInput.addEventListener('input', (e) => {
-    feedSearchQuery = e.target.value;
-    applyFiltersAndRender();
-  });
+function formatNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return new Intl.NumberFormat(getLocale()).format(number);
+}
+
+function formatCompactNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return new Intl.NumberFormat(getLocale(), {
+    notation: "compact",
+    maximumFractionDigits: 1
+  }).format(number);
 }
