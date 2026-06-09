@@ -1,5 +1,5 @@
 // milan-safety/data.js
-// Official public data configuration only. The app does not create generated incident rows.
+// Official public data configuration only. The app does not create incident-level rows.
 
 const translationDictionary = {
   en: {
@@ -298,7 +298,7 @@ const milanOfficialArea = {
 
 const recentNewsAlerts = [
   {
-    en: "Official data mode: records load from Comune di Milano DS564. The app does not create generated incident rows.",
+    en: "Official data mode: records load from Comune di Milano DS564. The app does not create incident-level rows.",
     zh: "官方数据模式：记录来自米兰市政府 DS564，本应用不生成案件行。",
     it: "Modalita dati ufficiali: i record arrivano dal DS564 del Comune di Milano; l'app non genera righe evento."
   },

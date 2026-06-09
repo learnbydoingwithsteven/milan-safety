@@ -4,22 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Milan Safety Map</title>
-  
-  <!-- Leaflet CSS for Map rendering -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-        
-  <!-- Custom Premium Stylesheets -->
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
-  <div id="app-container">
-    
-    <!-- LEFT SIDEBAR: Brand, Controls, Filters & Official Citations -->
+  <div id="app-container" class="mode-stats">
+
     <aside class="panel">
-      
-      <!-- Brand & Header -->
       <div class="brand-header">
         <div class="brand-title-row">
           <div class="brand-icon">
@@ -29,45 +23,51 @@
           </div>
           <h1 class="brand-title">Milan Safety Map</h1>
         </div>
-        <p class="brand-subtitle">Official annual reported-offence aggregates from Comune di Milano open data</p>
+        <p class="brand-subtitle" id="active-view-subtitle">Official annual reported-offence aggregates from Comune di Milano open data</p>
       </div>
 
-      <!-- Control Section: View Modes -->
       <div class="control-section">
-        <h3 class="section-title" id="view-mode-title">
-          <svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-          Map View Mode
+        <h3 class="section-title">
+          <svg viewBox="0 0 24 24"><path d="M4 5h16v4H4V5zm0 5h16v4H4v-4zm0 5h16v4H4v-4z"/></svg>
+          Primary View
         </h3>
-        <div class="view-mode-grid">
-          <button class="view-btn active" id="btn-heatmap">
-            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L12 15v2.93h1zm3.88-3.09c-.31-.5-.72-.94-1.21-1.28L14 11.23V9h4.31c.21.6.38 1.24.47 1.91.03.25-.01.5-.12.72l-1.78 3.21z"/></svg>
-            <span>Heatmap View</span>
+        <div class="view-toggle-grid">
+          <button class="view-btn active" id="btn-view-stats" data-primary-view="stats">
+            <svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+            <span>Official Stats Grid</span>
           </button>
-          <button class="view-btn" id="btn-bubble">
-            <svg viewBox="0 0 24 24"><circle cx="7.2" cy="7.2" r="5.2"/><circle cx="16.8" cy="16.8" r="5.2"/><circle cx="16.8" cy="7.2" r="3"/><circle cx="7.2" cy="16.8" r="3"/></svg>
-            <span>District Bubble Map</span>
-          </button>
-          <button class="view-btn" id="btn-choropleth">
-            <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2z"/></svg>
-            <span>District Choropleth Map</span>
-          </button>
-          <button class="view-btn" id="btn-marker">
-            <svg viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg>
-            <span>No Incident Pins</span>
+          <button class="view-btn" id="btn-view-news" data-primary-view="news">
+            <svg viewBox="0 0 24 24"><path d="M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5z"/></svg>
+            <span>News Heatmap</span>
           </button>
         </div>
       </div>
 
-      <!-- Control Section: Filters & Hour Slider -->
+      <div class="control-section news-only">
+        <h3 class="section-title">
+          <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          News Map Layer
+        </h3>
+        <div class="view-mode-grid">
+          <button class="view-btn active" id="btn-heatmap">
+            <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2zm0 3a7 7 0 0 1 7 7 7 7 0 0 1-7 7 7 7 0 0 1-7-7 7 7 0 0 1 7-7z"/></svg>
+            <span>Heat Layer</span>
+          </button>
+          <button class="view-btn" id="btn-marker">
+            <svg viewBox="0 0 24 24"><path d="M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7zm0 9.5c-1.4 0-2.5-1.1-2.5-2.5S10.6 6.5 12 6.5s2.5 1.1 2.5 2.5-1.1 2.5-2.5 2.5z"/></svg>
+            <span>Source Pins</span>
+          </button>
+        </div>
+      </div>
+
       <div class="control-section">
         <h3 class="section-title" id="filters-title">
           <svg viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></svg>
           Inspect Official Data
         </h3>
-        
-        <!-- Category Filter -->
+
         <div class="filter-group">
-          <label class="filter-label" id="label-category" for="filter-category">Category</label>
+          <label class="filter-label" id="label-category" for="filter-category">Crime type</label>
           <div class="select-wrapper">
             <select id="filter-category" class="filter-select">
               <option value="all">All Crime Types</option>
@@ -75,11 +75,17 @@
           </div>
         </div>
 
-        <!-- Severity Filter -->
-        <div class="filter-group">
-          <label class="filter-label" id="label-severity" for="filter-severity">Granularity</label>
+        <div class="filter-group exact-month-group is-active">
+          <label class="filter-label" id="label-exact-month" for="filter-exact-month">Official year</label>
           <div class="select-wrapper">
-            <select id="filter-severity" class="filter-select">
+            <select id="filter-exact-month" class="filter-select"></select>
+          </div>
+        </div>
+
+        <div class="filter-group stats-only">
+          <label class="filter-label" for="filter-severity">Granularity</label>
+          <div class="select-wrapper">
+            <select id="filter-severity" class="filter-select" disabled>
               <option value="all">Annual city aggregate</option>
               <option value="street">Street level not available</option>
               <option value="hour">Hour level not available</option>
@@ -88,86 +94,111 @@
           </div>
         </div>
 
-        <!-- Granular Hour Range Filter -->
-        <div class="filter-group">
-          <label class="filter-label" id="label-time" for="filter-hour">Hour filter is not available in this official annual source</label>
+        <div class="filter-group stats-only">
+          <label class="filter-label" for="filter-hour">Hour filter is not available in DS564</label>
           <div class="slider-container" style="padding-top:4px;">
-            <input type="range" id="filter-hour" min="-1" max="23" value="-1" class="hour-slider" style="width:100%;">
+            <input type="range" id="filter-hour" min="-1" max="23" value="-1" class="hour-slider" style="width:100%;" disabled>
             <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:0.75rem; color:var(--text-secondary);">
               <span id="slider-min-readout">No hour field</span>
               <span id="slider-max-readout"></span>
             </div>
           </div>
         </div>
-
       </div>
 
-      <!-- Provenance Citation Box -->
       <div class="control-section citation-section" style="border-bottom:none; margin-top:auto;">
         <h4 id="provenance-title" style="font-size:0.82rem; font-family:var(--font-title); color:var(--text-primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="var(--accent-cyan)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="var(--accent-cyan)"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
           Official Data Provenance
         </h4>
         <p id="provenance-desc" style="font-size:0.72rem; color:var(--text-secondary); line-height:1.4; margin-bottom:12px;">
-          Loaded from Comune di Milano DS564: reported offences to the judicial authority by police forces, 2004-2023. This source is annual and city-level.
+          View 1 uses Comune di Milano DS564. View 2 uses GDELT news index results and inferred Milan place names.
         </p>
         <div style="font-size:0.7rem; color:var(--text-muted);">
-          <span id="cites-label">Official Citations:</span>
+          <span id="cites-label">Source Links:</span>
           <div id="source-link-list" class="source-link-list">
             <a class="citation-badge" href="https://dati.comune.milano.it/dataset/ds564-reati-denunciati-all-autorita-giudiziaria-dalla-forze-di-polizia-2004-avanti" target="_blank" rel="noopener noreferrer">Comune Milano DS564</a>
-            <a class="citation-badge" href="https://milanostatistica.comune.milano.it/" target="_blank" rel="noopener noreferrer">Milano Statistica</a>
+            <a class="citation-badge" href="https://www.gdeltproject.org/data.html" target="_blank" rel="noopener noreferrer">GDELT GKG</a>
             <a class="citation-badge" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a>
           </div>
         </div>
       </div>
-
     </aside>
 
-    <!-- CENTER AREA: Interactive Leaflet Map & News Ticker HUD -->
-    <main id="map-viewport">
-      
-      <!-- Leaflet Target Container -->
-      <div id="map"></div>
-
-      <!-- HUD: Language Switcher -->
-      <div class="hud-widget language-switch-hud">
-        <button class="lang-btn active" data-lang="en">EN</button>
-        <button class="lang-btn" data-lang="zh">中</button>
-        <button class="lang-btn" data-lang="it">IT</button>
-      </div>
-
-      <!-- HUD: Risk Legend Box -->
-      <div class="hud-widget legend-hud">
-        <h5 id="legend-title-text">Risk Level Indicator</h5>
-        <div class="legend-row">
-          <div class="legend-dot low"></div>
-          <span id="legend-desc-low">Minimal incidents / Safe residential</span>
-        </div>
-        <div class="legend-row">
-          <div class="legend-dot medium"></div>
-          <span id="legend-desc-med">Caution suggested at night / Nightlife areas</span>
-        </div>
-        <div class="legend-row">
-          <div class="legend-dot high"></div>
-          <span id="legend-desc-high">High vigilance / Central transport hubs at night</span>
-        </div>
-      </div>
-
-      <!-- BOTTOM WIDGET: News Ticker -->
-      <div id="news-ticker-hud" class="hud-widget">
-        <div id="news-ticker-tag">
-          <span id="news-ticker-tag-text">OFFICIAL DATA NOTICE</span>
-        </div>
-        <div id="news-ticker-scroll-container">
-          <div id="news-ticker-scroll-content">
-            <!-- Populated dynamically by app.js -->
+    <main id="main-surface">
+      <section id="stats-surface" class="surface-view">
+        <div class="surface-header">
+          <div>
+            <div class="surface-kicker">View 1 / Official Aggregate Statistics</div>
+            <h2>Stats grid without map distortion</h2>
+            <p>DS564 is annual and city-level, so this view emphasizes transparent totals, trends, fields, and unavailable dimensions instead of a Milan map that would add no geographic information.</p>
+          </div>
+          <div class="hud-widget language-switch-hud inline-language">
+            <button class="lang-btn active" data-lang="en">EN</button>
+            <button class="lang-btn" data-lang="zh">ZH</button>
+            <button class="lang-btn" data-lang="it">IT</button>
           </div>
         </div>
-      </div>
 
+        <div id="stats-grid" class="stats-grid"></div>
+
+        <div class="stats-chart-grid">
+          <div class="chart-container">
+            <div class="chart-title" id="chart-title-cat">Crime Type Breakdown</div>
+            <div class="chart-wrapper"><canvas id="categoryChart"></canvas></div>
+          </div>
+          <div class="chart-container">
+            <div class="chart-title" id="chart-title-time">Annual Trend</div>
+            <div class="chart-wrapper"><canvas id="hourlyChart"></canvas></div>
+          </div>
+          <div class="chart-container">
+            <div class="chart-title" id="chart-title-district">Source Coverage and Fields</div>
+            <div class="chart-wrapper"><canvas id="districtChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="stats-table-shell">
+          <div class="chart-title">Official DS564 Records</div>
+          <div id="stats-table" class="stats-table"></div>
+        </div>
+      </section>
+
+      <section id="news-surface" class="surface-view">
+        <div id="map"></div>
+
+        <div class="hud-widget language-switch-hud">
+          <button class="lang-btn active" data-lang="en">EN</button>
+          <button class="lang-btn" data-lang="zh">ZH</button>
+          <button class="lang-btn" data-lang="it">IT</button>
+        </div>
+
+        <div class="hud-widget legend-hud">
+          <h5 id="legend-title-text">News Heatmap Scope</h5>
+          <div class="legend-row">
+            <div class="legend-dot low"></div>
+            <span>Exact Milan place-name match</span>
+          </div>
+          <div class="legend-row">
+            <div class="legend-dot medium"></div>
+            <span>Neighborhood / station / street cue</span>
+          </div>
+          <div class="legend-row">
+            <div class="legend-dot high"></div>
+            <span>Citywide or ambiguous Milan item</span>
+          </div>
+        </div>
+
+        <div id="news-ticker-hud" class="hud-widget">
+          <div id="news-ticker-tag">
+            <span id="news-ticker-tag-text">NEWS INDEX</span>
+          </div>
+          <div id="news-ticker-scroll-container">
+            <div id="news-ticker-scroll-content">Open the News Heatmap view to load sourced GDELT records.</div>
+          </div>
+        </div>
+      </section>
     </main>
 
-    <!-- RIGHT SIDEBAR: Live Analytics Dashboard & Incident Feed -->
     <aside class="panel right-panel">
       <div class="brand-header">
         <h2 class="section-title" id="analytics-title" style="margin-bottom:0;">
@@ -176,89 +207,36 @@
         </h2>
       </div>
 
-      <!-- Data source and temporal inspection controls -->
       <div class="control-section temporal-section">
         <h3 class="section-title" id="data-view-title">
           <svg viewBox="0 0 24 24"><path d="M3 3h18v4H3V3zm0 7h18v4H3v-4zm0 7h18v4H3v-4z"/></svg>
-          Data View
+          Data Source Summary
         </h3>
-        <div class="segmented-control" id="temporal-view-controls">
-          <button class="seg-btn" data-time-view="hour" id="time-view-hour">Hour N/A</button>
-          <button class="seg-btn" data-time-view="dayOfMonth" id="time-view-day">Day N/A</button>
-          <button class="seg-btn" data-time-view="monthOfYear" id="time-view-month">Month N/A</button>
-          <button class="seg-btn active" data-time-view="exactMonth" id="time-view-exact">Year</button>
-        </div>
-        <div class="filter-group exact-month-group">
-          <label class="filter-label" id="label-exact-month" for="filter-exact-month">Official year</label>
-          <div class="select-wrapper">
-            <select id="filter-exact-month" class="filter-select"></select>
-          </div>
-        </div>
         <div id="data-source-summary" class="data-source-summary"></div>
       </div>
 
-      <!-- Upper half: Interactive Chart Dashboards -->
-      <div class="control-section" style="border-bottom: 1px solid var(--border-color); max-height:48vh; overflow-y:auto; padding-bottom: 10px;">
-        <!-- Category Chart -->
-        <div class="chart-container">
-          <div class="chart-title" id="chart-title-cat">Crime Type Breakdown</div>
-          <div class="chart-wrapper">
-            <canvas id="categoryChart"></canvas>
-          </div>
-        </div>
-
-        <!-- Time distribution Chart -->
-        <div class="chart-container">
-          <div class="chart-title" id="chart-title-time">Annual Trend</div>
-          <div class="chart-wrapper">
-            <canvas id="hourlyChart"></canvas>
-          </div>
-        </div>
-
-        <!-- District Risk Rating -->
-        <div class="chart-container" style="margin-bottom:0;">
-          <div class="chart-title" id="chart-title-district">Source Coverage and Fields</div>
-          <div class="chart-wrapper">
-            <canvas id="districtChart"></canvas>
-          </div>
-        </div>
-      </div>
-
-      <!-- Lower half: Searchable Incident List Feed -->
       <div class="control-section feed-section" style="flex:1; display:flex; flex-direction:column; overflow:hidden; padding-top:16px;">
         <h3 class="section-title" id="feed-title-label" style="margin-bottom:12px;">
           <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0-2-.9-2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
           Official Records
         </h3>
-        
-        <!-- Search bar -->
+
         <div style="position:relative; margin-bottom:12px;">
-          <input type="text" id="feed-search" placeholder="Search crime type, year, or count..." class="search-input">
+          <input type="text" id="feed-search" placeholder="Search records..." class="search-input">
           <svg viewBox="0 0 24 24" class="search-icon"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
         </div>
 
-        <!-- Scrollable Incident Items -->
-        <div id="incident-feed-items">
-          <!-- Populated by app.js -->
-        </div>
+        <div id="incident-feed-items"></div>
       </div>
-
     </aside>
-
   </div>
 
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-          
-  <!-- Leaflet Heatmap Plugin -->
   <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-  
-  <!-- Chart.js for analytics -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-  <!-- Core scripts -->
   <script src="data.js"></script>
+  <script src="news-data.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
