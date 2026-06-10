@@ -3,6 +3,7 @@
 let activeLanguage = "en";
 let activePrimaryView = "stats";
 let activeMapLayerMode = "heatmap";
+let isApplyingInitialUrlState = false;
 
 let officialRecords = [];
 let officialLoadState = {
@@ -111,19 +112,96 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 async function bootstrap() {
-  initLanguage();
+  const initialUrlState = readInitialUrlState();
+  isApplyingInitialUrlState = true;
+  initLanguage(initialUrlState.language);
   setupEventListeners();
   initCharts();
-  setPrimaryView("stats", { skipRender: true });
+  setMapLayerMode(initialUrlState.layer, { skipRender: true, skipUrlSync: true });
+  applyInitialFilters(initialUrlState);
+  setPrimaryView(initialUrlState.view, { skipRender: true, skipUrlSync: true });
   renderLoadingState();
   await loadOfficialCrimeData();
+  applyInitialFilters(initialUrlState);
   populateControls();
+  syncSearchInput();
   renderActiveView();
+  isApplyingInitialUrlState = false;
+  syncUrlState({ replace: true });
 }
 
-function initLanguage() {
+function initLanguage(preferredLanguage) {
   const savedLang = localStorage.getItem("milan_safety_lang");
-  if (savedLang && ["en", "zh", "it"].includes(savedLang)) activeLanguage = savedLang;
+  if (preferredLanguage && ["en", "zh", "it"].includes(preferredLanguage)) {
+    activeLanguage = preferredLanguage;
+  } else if (savedLang && ["en", "zh", "it"].includes(savedLang)) {
+    activeLanguage = savedLang;
+  }
+  document.querySelectorAll(".lang-btn").forEach(item => item.classList.toggle("active", item.dataset.lang === activeLanguage));
+}
+
+function readInitialUrlState() {
+  const params = new URLSearchParams(window.location.search);
+  const viewParam = (params.get("view") || "").toLowerCase();
+  const layerParam = (params.get("layer") || params.get("map") || "").toLowerCase();
+  const languageParam = (params.get("lang") || params.get("language") || "").toLowerCase();
+
+  return {
+    view: viewParam === "news" || viewParam === "heatmap" || viewParam === "map" ? "news" : "stats",
+    layer: ["marker", "markers", "pins", "pin", "source", "sources"].includes(layerParam) ? "markerPins" : "heatmap",
+    language: languageParam === "cn" ? "zh" : (["en", "zh", "it"].includes(languageParam) ? languageParam : ""),
+    category: params.get("category") || params.get("type") || "all",
+    year: params.get("year") || params.get("period") || "all",
+    search: params.get("search") || params.get("q") || ""
+  };
+}
+
+function applyInitialFilters(state) {
+  const category = state.category || "all";
+  const year = state.year || "all";
+  const search = state.search || "";
+
+  if (state.view === "news") {
+    newsFilters.category = category;
+    newsFilters.year = year;
+    searchQueries.news = search;
+  } else {
+    officialFilters.category = category;
+    officialFilters.year = year;
+    searchQueries.stats = search;
+  }
+}
+
+function syncSearchInput() {
+  const searchInput = document.getElementById("feed-search");
+  if (searchInput) searchInput.value = searchQueries[activePrimaryView] || "";
+}
+
+function syncUrlState(options = {}) {
+  if (isApplyingInitialUrlState || !window.history || !window.location) return;
+
+  const params = new URLSearchParams(window.location.search);
+  const activeFilters = activePrimaryView === "news" ? newsFilters : officialFilters;
+  const activeSearch = (searchQueries[activePrimaryView] || "").trim();
+
+  setOrDeleteParam(params, "view", activePrimaryView === "news" ? "news" : "");
+  setOrDeleteParam(params, "layer", activePrimaryView === "news" && activeMapLayerMode === "markerPins" ? "marker" : "");
+  setOrDeleteParam(params, "lang", activeLanguage !== "en" ? activeLanguage : "");
+  setOrDeleteParam(params, "category", activeFilters.category !== "all" ? activeFilters.category : "");
+  setOrDeleteParam(params, "year", activeFilters.year !== "all" ? activeFilters.year : "");
+  setOrDeleteParam(params, "search", activeSearch);
+
+  const query = params.toString();
+  const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+  if (nextUrl === `${window.location.pathname}${window.location.search}${window.location.hash}`) return;
+
+  const method = options.replace === false ? "pushState" : "replaceState";
+  window.history[method](null, "", nextUrl);
+}
+
+function setOrDeleteParam(params, key, value) {
+  if (value === undefined || value === null || value === "") params.delete(key);
+  else params.set(key, value);
 }
 
 function t(key, fallback) {
@@ -514,6 +592,7 @@ function setupEventListeners() {
       document.querySelectorAll(".lang-btn").forEach(item => item.classList.toggle("active", item.dataset.lang === activeLanguage));
       populateControls();
       renderActiveView();
+      syncUrlState({ replace: true });
     });
   });
 
@@ -524,30 +603,36 @@ function setupEventListeners() {
   Object.entries(layerButtons).forEach(([id, mode]) => {
     const button = document.getElementById(id);
     if (!button) return;
-    button.addEventListener("click", () => {
-      activeMapLayerMode = mode;
-      Object.keys(layerButtons).forEach(key => document.getElementById(key)?.classList.remove("active"));
-      button.classList.add("active");
-      renderActiveView();
-    });
+    button.addEventListener("click", () => setMapLayerMode(mode));
   });
 
   document.getElementById("filter-category")?.addEventListener("change", event => {
     if (activePrimaryView === "stats") officialFilters.category = event.target.value;
     else newsFilters.category = event.target.value;
     renderActiveView();
+    syncUrlState({ replace: true });
   });
 
   document.getElementById("filter-exact-month")?.addEventListener("change", event => {
     if (activePrimaryView === "stats") officialFilters.year = event.target.value;
     else newsFilters.year = event.target.value;
     renderActiveView();
+    syncUrlState({ replace: true });
   });
 
   document.getElementById("feed-search")?.addEventListener("input", event => {
     searchQueries[activePrimaryView] = event.target.value;
     renderActiveView();
+    syncUrlState({ replace: true });
   });
+}
+
+function setMapLayerMode(mode, options = {}) {
+  activeMapLayerMode = mode === "markerPins" ? "markerPins" : "heatmap";
+  document.getElementById("btn-heatmap")?.classList.toggle("active", activeMapLayerMode === "heatmap");
+  document.getElementById("btn-marker")?.classList.toggle("active", activeMapLayerMode === "markerPins");
+  if (!options.skipRender) renderActiveView();
+  if (!options.skipUrlSync) syncUrlState({ replace: true });
 }
 
 function setPrimaryView(view, options = {}) {
@@ -576,9 +661,9 @@ function setPrimaryView(view, options = {}) {
   }
 
   populateControls();
-  const searchInput = document.getElementById("feed-search");
-  if (searchInput) searchInput.value = searchQueries[view] || "";
+  syncSearchInput();
   if (!options.skipRender) renderActiveView();
+  if (!options.skipUrlSync) syncUrlState({ replace: true });
 }
 
 function populateControls() {

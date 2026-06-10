@@ -1393,8 +1393,20 @@ a.citation-badge {
   }
 
   #app-container {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(58vh, auto) auto;
     height: auto;
     min-height: 100vh;
+    overflow-y: auto;
+  }
+
+  .panel {
+    max-height: 42vh;
+    width: 100%;
+  }
+
+  .panel.right-panel {
+    max-height: 52vh;
   }
 
   #main-surface {
@@ -1409,6 +1421,7 @@ a.citation-badge {
 
   #news-surface,
   .mode-news #map {
+    height: 58vh;
     min-height: 58vh;
   }
 

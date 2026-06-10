@@ -46,6 +46,22 @@ The news snapshot is generated from the source-linked CSV and stored in `news-da
 - Personal page: https://learnbydoingwithsteven.github.io/
 - Linktree: https://linktr.ee/learnbydoingwithsteven
 
+## Shareable View URLs
+
+The frontend accepts cautious URL parameters for direct inspection:
+
+- `?view=stats` opens the official DS564 stats grid.
+- `?view=news` opens the source-linked news heatmap.
+- `?view=news&layer=marker` opens source pins instead of the heat layer.
+- `lang=en`, `lang=zh`, or `lang=it` selects the UI language.
+- `year=2026`, `year=2025`, `category=robbery`, and `search=centrale` can prefill the active view filters.
+
+Example:
+
+```text
+https://learnbydoingwithsteven.github.io/milan-safety/?view=news&layer=marker&year=2026
+```
+
 ## Local Use
 
 Open `index.html` directly, or serve the folder locally:
